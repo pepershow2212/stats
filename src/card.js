@@ -177,9 +177,13 @@ function roundRect(ctx, x, y, w, h, r) {
 }
 
 function fillPanel(ctx, x, y, w, h, r = 16) {
-  ctx.fillStyle = "rgba(10, 8, 6, 0.58)";
+  ctx.fillStyle = "rgba(8, 6, 4, 0.88)";
   roundRect(ctx, x, y, w, h, r);
   ctx.fill();
+  ctx.strokeStyle = "rgba(232, 163, 23, 0.22)";
+  ctx.lineWidth = 1.5;
+  roundRect(ctx, x, y, w, h, r);
+  ctx.stroke();
 }
 
 function text(ctx, value, x, y, { size = 28, color = WHITE, align = "left", weight = "600" } = {}) {
