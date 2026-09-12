@@ -1,3 +1,5 @@
+import { isSteamId64 } from "./logic.js";
+
 const SUMMARIES = "https://api.steampowered.com/ISteamUser/GetPlayerSummaries/v2/";
 const BANS = "https://api.steampowered.com/ISteamUser/GetPlayerBans/v1/";
 const OWNED = "https://api.steampowered.com/IPlayerService/GetOwnedGames/v1/";
@@ -90,5 +92,42 @@ export async function enrichPlayers(store, { apiKey, appId, steamIds, now }) {
       communityBanned: ban.communityBanned,
       at: now,
     });
+  }
+}
+
+export function parseCommunityXml(xml) {
+  const text = String(xml || "");
+  const tag = (name) => {
+    const cdata = text.match(new RegExp(`<${name}><!\\[CDATA\\[([\\s\\S]*?)\\]\\]></${name}>`));
+    if (cdata?.[1]) return cdata[1].trim();
+    const plain = text.match(new RegExp(`<${name}>([\\s\\S]*?)</${name}>`));
+    return plain?.[1]?.trim() || "";
+  };
+  return {
+    name: tag("steamID"),
+    avatar: tag("avatarFull") || tag("avatarMedium") || tag("avatarIcon"),
+  };
+}
+
+export async function fetchCommunityProfile(steamId) {
+  if (!isSteamId64(steamId)) return null;
+  const response = await fetch(`https://steamcommunity.com/profiles/${steamId}/?xml=1`, {
+    signal: AbortSignal.timeout(8000),
+    headers: { "User-Agent": "WARDOGS-STATS/1.0" },
+  });
+  if (!response.ok) throw new Error(`Steam profile ${response.status}`);
+  const parsed = parseCommunityXml(await response.text());
+  return parsed.avatar || parsed.name ? parsed : null;
+}
+
+export async function enrichAvatars(store, steamIds, now) {
+  const ids = [...new Set((steamIds || []).filter(Boolean))].slice(0, 8);
+  for (const steamId of ids) {
+    try {
+      const profile = await fetchCommunityProfile(steamId);
+      store.updateAvatar(steamId, profile?.avatar || null, now);
+    } catch (error) {
+      console.warn("steam avatar:", steamId, error instanceof Error ? error.message : error);
+    }
   }
 }

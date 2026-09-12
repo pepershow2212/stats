@@ -150,6 +150,12 @@ export class StatsStore {
         steam_checked_at = @at
       WHERE steam_id = @steamId
     `);
+    this._setAvatar = db.prepare(`
+      UPDATE players SET
+        avatar = CASE WHEN @avatar IS NOT NULL AND @avatar != '' THEN @avatar ELSE avatar END,
+        steam_checked_at = @at
+      WHERE steam_id = @steamId
+    `);
     this._staleSteam = db.prepare(`
       SELECT steam_id FROM players
       WHERE last_seen > @since AND steam_checked_at < @stale
@@ -345,6 +351,10 @@ export class StatsStore {
       communityBanned: data.communityBanned ? 1 : 0,
       at: data.at,
     });
+  }
+
+  updateAvatar(steamId, avatar, at) {
+    this._setAvatar.run({ steamId, avatar: avatar || null, at });
   }
 
   panel(channelId) {

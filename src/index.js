@@ -1,19 +1,29 @@
 import { startBot } from "./bot.js";
+import { describeCardFonts } from "./card.js";
 import { config, envFileExists, trackedServers } from "./config.js";
 import { openDb } from "./db.js";
 import { startMockRcon } from "./mock-rcon.js";
 import { Poller } from "./poller.js";
 
 async function main() {
-  if (!envFileExists()) {
-    console.warn("нет .env — скопируй .env.example");
-  }
-
   const servers = trackedServers();
   if (!servers.length) {
-    console.error("Нет RCON. Заполни SERVER_1_RCON_HOST и PASSWORD или запусти: npm run mock");
+    if (!envFileExists()) {
+      console.error("нет .env и нет SERVER_* в окружении — скопируй .env.example или задай переменные на хосте");
+    } else {
+      console.error("Нет RCON. Заполни SERVER_1_RCON_HOST и PASSWORD или запусти: npm run mock");
+    }
     process.exit(1);
   }
+
+  if (!envFileExists()) {
+    console.log("файла .env нет — беру Discord и RCON из переменных окружения");
+  }
+
+  const fonts = describeCardFonts();
+  console.log(
+    `шрифты: ${fonts.registered.join(", ") || "не найдены"} · sample ${fonts.sampleWidth.toFixed(0)}px${fonts.ok ? "" : " — текст на карточке может пропасть"}`,
+  );
 
   let mock = null;
   if (config.mockRcon) {

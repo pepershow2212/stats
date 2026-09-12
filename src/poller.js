@@ -1,6 +1,6 @@
 import { applyTick, emptyState } from "./logic.js";
 import { fetchSnapshot } from "./rcon.js";
-import { enrichPlayers } from "./steam.js";
+import { enrichAvatars, enrichPlayers } from "./steam.js";
 
 export class Poller {
   constructor({ store, servers, pollMs, steamApiKey, appId }) {
@@ -100,7 +100,6 @@ export class Poller {
   }
 
   async flushSteam() {
-    if (!this.steamApiKey) return;
     const now = Date.now();
     const stale = this.store.staleSteamIds(now);
     const queued = [...this.steamQueue].slice(0, 20);
@@ -108,12 +107,16 @@ export class Poller {
     const ids = [...new Set([...stale, ...queued])].slice(0, 30);
     if (!ids.length) return;
     try {
-      await enrichPlayers(this.store, {
-        apiKey: this.steamApiKey,
-        appId: this.appId,
-        steamIds: ids,
-        now,
-      });
+      if (this.steamApiKey) {
+        await enrichPlayers(this.store, {
+          apiKey: this.steamApiKey,
+          appId: this.appId,
+          steamIds: ids,
+          now,
+        });
+      } else {
+        await enrichAvatars(this.store, ids, now);
+      }
     } catch (error) {
       console.warn("steam enrich:", error instanceof Error ? error.message : error);
     }

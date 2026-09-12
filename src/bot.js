@@ -10,6 +10,7 @@ import {
   SlashCommandBuilder,
 } from "discord.js";
 import { renderStatsCard } from "./card.js";
+import { fetchCommunityProfile } from "./steam.js";
 import { Cooldown } from "./cooldown.js";
 import { isSteamId64 } from "./logic.js";
 import { resolveSteamId } from "./lookup.js";
@@ -348,6 +349,21 @@ async function replyStats(interaction, store, poller, servers, raw) {
     return false;
   }
   const view = buildView(store, poller, servers, player);
+  if (!view.avatar) {
+    try {
+      const profile = await fetchCommunityProfile(player.steam_id);
+      if (profile?.avatar) {
+        store.updateAvatar(player.steam_id, profile.avatar, Date.now());
+        view.avatar = profile.avatar;
+      }
+    } catch (error) {
+      console.warn("steam avatar:", error.message);
+    }
+  }
+  const own = store.linkForDiscord(interaction.user.id);
+  if (!view.avatar && own?.steam_id === player.steam_id) {
+    view.avatar = interaction.user.displayAvatarURL({ extension: "png", size: 256, forceStatic: true });
+  }
   let payload;
   try {
     payload = statsCardMessage(view, await renderStatsCard(view));

@@ -1,19 +1,92 @@
 import { createCanvas, GlobalFonts, loadImage } from "@napi-rs/canvas";
+import { existsSync, readdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
-const FONT_DIR = join(dirname(fileURLToPath(import.meta.url)), "..", "assets", "fonts");
-const FONT = "WD Sans";
-try {
-  GlobalFonts.registerFromPath(join(FONT_DIR, "NotoSans-Regular.ttf"), FONT);
-  GlobalFonts.registerFromPath(join(FONT_DIR, "NotoSans-Bold.ttf"), FONT);
-  GlobalFonts.registerFromPath(join(FONT_DIR, "NotoSans-ExtraBold.ttf"), FONT);
-} catch (error) {
-  console.warn("fonts:", error.message);
+const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
+const FACE = {
+  regular: "WD Regular",
+  bold: "WD Bold",
+  extra: "WD ExtraBold",
+};
+const registered = new Set();
+
+function registerFont(path, name) {
+  if (!path || !existsSync(path) || registered.has(name)) return false;
+  try {
+    if (GlobalFonts.registerFromPath(path, name) !== false) {
+      registered.add(name);
+      return true;
+    }
+  } catch (error) {
+    console.warn("fonts:", path, error.message);
+  }
+  return false;
 }
 
-function fontFace() {
-  return `"${FONT}", "Noto Sans", "DejaVu Sans", "Segoe UI", Arial, sans-serif`;
+export function registerCardFonts() {
+  const bundled = join(ROOT, "assets", "fonts");
+  registerFont(join(bundled, "NotoSans-Regular.ttf"), FACE.regular);
+  registerFont(join(bundled, "NotoSans-Bold.ttf"), FACE.bold);
+  registerFont(join(bundled, "NotoSans-ExtraBold.ttf"), FACE.extra);
+
+  const dirs = [
+    bundled,
+    "/usr/src/app/assets/fonts",
+    "/app/assets/fonts",
+    "/usr/share/fonts/truetype/noto",
+    "/usr/share/fonts/opentype/noto",
+    "/usr/share/fonts/truetype/dejavu",
+    "/usr/share/fonts/truetype/liberation",
+  ];
+  const want = [
+    { name: FACE.regular, match: /^(NotoSans-Regular|DejaVuSans|LiberationSans-Regular)\.ttf$/i },
+    { name: FACE.bold, match: /^(NotoSans-Bold|NotoSans-SemiBold|DejaVuSans-Bold|LiberationSans-Bold)\.ttf$/i },
+    { name: FACE.extra, match: /^(NotoSans-ExtraBold|NotoSans-Black)\.ttf$/i },
+  ];
+  for (const dir of dirs) {
+    if (!existsSync(dir)) continue;
+    let files = [];
+    try {
+      files = readdirSync(dir);
+    } catch {
+      continue;
+    }
+    for (const spec of want) {
+      const file = files.find((name) => spec.match.test(name));
+      if (file) registerFont(join(dir, file), spec.name);
+    }
+  }
+  return [...registered];
+}
+
+registerCardFonts();
+
+function faceName(weight = 400) {
+  const n = Number(weight) || 400;
+  if (n >= 800 && registered.has(FACE.extra)) return FACE.extra;
+  if (n >= 600 && registered.has(FACE.bold)) return FACE.bold;
+  if (registered.has(FACE.regular)) return FACE.regular;
+  if (registered.has(FACE.bold)) return FACE.bold;
+  return FACE.regular;
+}
+
+function fontFace(weight = 400) {
+  return `"${faceName(weight)}"`;
+}
+
+export function describeCardFonts() {
+  const canvas = createCanvas(80, 40);
+  const ctx = canvas.getContext("2d");
+  ctx.font = `28px ${fontFace(800)}`;
+  const width = ctx.measureText("WАБ").width;
+  const families = (GlobalFonts.families || []).map((row) => row.family || row).filter(Boolean);
+  return {
+    registered: [...registered],
+    sampleWidth: width,
+    ok: width > 12,
+    families: families.filter((name) => /WD |Noto|DejaVu|Liberation|Segoe/i.test(name)),
+  };
 }
 
 const COVER_PATH = join(dirname(fileURLToPath(import.meta.url)), "..", "assets", "wardogs-cover.jpg");
@@ -83,6 +156,7 @@ async function paintScene(ctx, w, h, { blur = 14, dim = 0.28 } = {}) {
   veil.addColorStop(1, "rgba(8, 8, 10, 0)");
   ctx.fillStyle = veil;
   ctx.fillRect(0, 0, w, h);
+  ctx.filter = "none";
 }
 
 const W = 1400;
@@ -102,7 +176,7 @@ function roundRect(ctx, x, y, w, h, r) {
   ctx.closePath();
 }
 
-function text(ctx, value, x, y, { size = 28, color = WHITE, align = "left", weight = "600", italic = false } = {}) {
+function text(ctx, value, x, y, { size = 28, color = WHITE, align = "left", weight = "600" } = {}) {
   ctx.save();
   ctx.shadowColor = "rgba(0, 0, 0, 0.7)";
   ctx.shadowBlur = 8;
@@ -110,7 +184,7 @@ function text(ctx, value, x, y, { size = 28, color = WHITE, align = "left", weig
   ctx.fillStyle = color;
   ctx.textAlign = align;
   ctx.textBaseline = "alphabetic";
-  ctx.font = `${italic ? "italic " : ""}${weight} ${size}px ${fontFace()}`;
+  ctx.font = `${size}px ${fontFace(weight)}`;
   ctx.fillText(String(value ?? "—"), x, y);
   ctx.restore();
 }
@@ -118,11 +192,32 @@ function text(ctx, value, x, y, { size = 28, color = WHITE, align = "left", weig
 function fitName(ctx, value, maxWidth) {
   let size = 54;
   while (size > 28) {
-    ctx.font = `800 ${size}px ${fontFace()}`;
+    ctx.font = `${size}px ${fontFace(800)}`;
     if (ctx.measureText(value).width <= maxWidth) return size;
     size -= 2;
   }
   return 28;
+}
+
+function drawInitials(ctx, name, x, y, size) {
+  const letter = String(name || "?")
+    .replace(/[^A-Za-zА-Яа-яЁё0-9]/g, "")
+    .slice(0, 1)
+    .toUpperCase() || "?";
+  ctx.save();
+  ctx.beginPath();
+  ctx.arc(x + size / 2, y + size / 2, size / 2, 0, Math.PI * 2);
+  ctx.fillStyle = "#1a1610";
+  ctx.fill();
+  ctx.strokeStyle = ORANGE;
+  ctx.lineWidth = 5;
+  ctx.stroke();
+  ctx.fillStyle = ORANGE;
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  ctx.font = `${Math.round(size * 0.42)}px ${fontFace(800)}`;
+  ctx.fillText(letter, x + size / 2, y + size / 2 + 2);
+  ctx.restore();
 }
 
 async function drawAvatar(ctx, url, x, y, size) {
@@ -329,7 +424,7 @@ export async function renderStatsCard(view) {
 
   const tag = String(view.rank?.tagline || "").split("\n");
   tag.forEach((line, i) => {
-    text(ctx, line, 860, 48 + i * 34, { size: 28, align: "right", color: WHITE, weight: "600", italic: true });
+    text(ctx, line, 860, 48 + i * 34, { size: 28, align: "right", color: WHITE, weight: "600" });
   });
 
   if (view.live) {
@@ -410,7 +505,7 @@ export async function renderStatsCard(view) {
   }
 
   const drawn = await drawAvatar(ctx, view.avatar, 1040, 70, 200);
-  if (!drawn && !(await getCover())) drawSoldier(ctx, 1150, 180);
+  if (!drawn) drawInitials(ctx, name, 1040, 70, 200);
   if (!(await drawLogo(ctx, 1088, 430, 250))) {
     drawIcon(ctx, "rank", 1170, 560, 48);
   }
