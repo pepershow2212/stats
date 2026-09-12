@@ -61,10 +61,33 @@ CREATE TABLE IF NOT EXISTS panels (
   guild_id TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS prize_boards (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  reason TEXT NOT NULL,
+  created_at INTEGER NOT NULL,
+  frozen INTEGER NOT NULL DEFAULT 0
+);
+
+CREATE TABLE IF NOT EXISTS prize_board_rows (
+  board_id INTEGER NOT NULL,
+  rank INTEGER NOT NULL,
+  steam_id TEXT NOT NULL,
+  name TEXT NOT NULL DEFAULT '',
+  kills INTEGER NOT NULL DEFAULT 0,
+  deaths INTEGER NOT NULL DEFAULT 0,
+  wins INTEGER NOT NULL DEFAULT 0,
+  matches INTEGER NOT NULL DEFAULT 0,
+  seconds_played INTEGER NOT NULL DEFAULT 0,
+  cash_peak INTEGER NOT NULL DEFAULT 0,
+  PRIMARY KEY (board_id, rank),
+  FOREIGN KEY (board_id) REFERENCES prize_boards(id) ON DELETE CASCADE
+);
+
 CREATE INDEX IF NOT EXISTS idx_players_kills ON players(kills DESC);
 CREATE INDEX IF NOT EXISTS idx_players_hours ON players(seconds_played DESC);
 CREATE INDEX IF NOT EXISTS idx_match_steam ON match_stats(steam_id, ended_at);
 CREATE INDEX IF NOT EXISTS idx_sessions_open ON sessions(server_id, left_at);
+CREATE INDEX IF NOT EXISTS idx_prize_boards_created ON prize_boards(created_at DESC);
 `;
 
 export function openDb(path) {
@@ -169,6 +192,26 @@ export class StatsStore {
       ON CONFLICT(channel_id) DO UPDATE SET message_id = excluded.message_id, guild_id = excluded.guild_id
     `);
     this._deletePanel = db.prepare(`DELETE FROM panels WHERE channel_id = ?`);
+    this._insertBoard = db.prepare(`
+      INSERT INTO prize_boards (reason, created_at, frozen)
+      VALUES (@reason, @createdAt, @frozen)
+    `);
+    this._insertBoardRow = db.prepare(`
+      INSERT INTO prize_board_rows (
+        board_id, rank, steam_id, name, kills, deaths, wins, matches, seconds_played, cash_peak
+      ) VALUES (
+        @boardId, @rank, @steamId, @name, @kills, @deaths, @wins, @matches, @secondsPlayed, @cashPeak
+      )
+    `);
+    this._deleteAutoBoards = db.prepare(`
+      DELETE FROM prize_boards WHERE reason = 'auto' AND frozen = 0
+    `);
+    this._latestBoard = db.prepare(`
+      SELECT * FROM prize_boards ORDER BY frozen DESC, created_at DESC LIMIT 1
+    `);
+    this._boardRows = db.prepare(`
+      SELECT * FROM prize_board_rows WHERE board_id = ? ORDER BY rank ASC
+    `);
     this._favorites = db.prepare(`
       SELECT faction, COUNT(*) AS n, SUM(won) AS wins
       FROM match_stats
@@ -293,22 +336,89 @@ export class StatsStore {
       .all(like, like);
   }
 
-  top(metric, limit = 10) {
-    const n = Math.min(25, Math.max(1, limit));
+  top(metric, limit = 100) {
+    const n = Math.min(100, Math.max(1, Number(limit) || 100));
+    const board = `
+      SELECT p.steam_id, p.name, p.seconds_played, p.cash_peak_best,
+             COALESCE(m.kills, 0) AS kills,
+             COALESCE(m.deaths, 0) AS deaths,
+             COALESCE(m.wins, 0) AS wins,
+             COALESCE(m.matches, 0) AS matches
+      FROM players p
+      LEFT JOIN (
+        SELECT steam_id,
+               SUM(kills) AS kills,
+               SUM(deaths) AS deaths,
+               SUM(won) AS wins,
+               COUNT(*) AS matches
+        FROM match_stats
+        GROUP BY steam_id
+      ) m ON m.steam_id = p.steam_id
+    `;
+    const kdExpr = `(CAST(COALESCE(m.kills, 0) AS REAL) / CASE WHEN COALESCE(m.deaths, 0) = 0 THEN 1 ELSE m.deaths END)`;
     const sql = {
-      kills: `SELECT * FROM players WHERE kills > 0 ORDER BY kills DESC, deaths ASC LIMIT ${n}`,
-      deaths: `SELECT * FROM players WHERE deaths > 0 ORDER BY deaths DESC LIMIT ${n}`,
-      hours: `SELECT * FROM players WHERE seconds_played > 0 ORDER BY seconds_played DESC LIMIT ${n}`,
-      cash: `SELECT * FROM players WHERE cash_peak_best > 0 ORDER BY cash_peak_best DESC LIMIT ${n}`,
-      wins: `SELECT * FROM players WHERE wins > 0 ORDER BY wins DESC, matches DESC LIMIT ${n}`,
-      matches: `SELECT * FROM players WHERE matches > 0 ORDER BY matches DESC, wins DESC LIMIT ${n}`,
-      kd: `SELECT * FROM players
-           WHERE matches >= 3 AND (kills + deaths) >= 8
-           ORDER BY (CAST(kills AS REAL) / CASE WHEN deaths = 0 THEN 1 ELSE deaths END) DESC,
-                    kills DESC LIMIT ${n}`,
+      kills: `${board}
+        WHERE COALESCE(m.kills, 0) > 0
+        ORDER BY kills DESC, ${kdExpr} DESC, p.seconds_played DESC
+        LIMIT ${n}`,
+      deaths: `${board}
+        WHERE COALESCE(m.deaths, 0) > 0
+        ORDER BY deaths DESC, kills DESC
+        LIMIT ${n}`,
+      hours: `${board}
+        WHERE p.seconds_played > 0
+        ORDER BY p.seconds_played DESC, kills DESC
+        LIMIT ${n}`,
+      cash: `${board}
+        WHERE p.cash_peak_best > 0
+        ORDER BY p.cash_peak_best DESC, kills DESC
+        LIMIT ${n}`,
+      wins: `${board}
+        WHERE COALESCE(m.wins, 0) > 0
+        ORDER BY wins DESC, matches DESC, kills DESC
+        LIMIT ${n}`,
+      matches: `${board}
+        WHERE COALESCE(m.matches, 0) > 0
+        ORDER BY matches DESC, wins DESC, kills DESC
+        LIMIT ${n}`,
+      kd: `${board}
+        WHERE COALESCE(m.matches, 0) >= 3 AND (COALESCE(m.kills, 0) + COALESCE(m.deaths, 0)) >= 8
+        ORDER BY ${kdExpr} DESC, kills DESC
+        LIMIT ${n}`,
     }[metric];
     if (!sql) return [];
     return this.db.prepare(sql).all();
+  }
+
+  saveBoard(rows, { reason = "auto", frozen = 0, at = Date.now() } = {}) {
+    const list = rows || [];
+    const tx = this.db.transaction((entries) => {
+      if (reason === "auto" && !frozen) this._deleteAutoBoards.run();
+      const info = this._insertBoard.run({ reason, createdAt: at, frozen: frozen ? 1 : 0 });
+      const boardId = Number(info.lastInsertRowid);
+      entries.forEach((row, index) => {
+        this._insertBoardRow.run({
+          boardId,
+          rank: index + 1,
+          steamId: row.steam_id,
+          name: row.name || "",
+          kills: row.kills || 0,
+          deaths: row.deaths || 0,
+          wins: row.wins || 0,
+          matches: row.matches || 0,
+          secondsPlayed: row.seconds_played || 0,
+          cashPeak: row.cash_peak_best || 0,
+        });
+      });
+      return boardId;
+    });
+    return tx(list);
+  }
+
+  latestBoard() {
+    const board = this._latestBoard.get();
+    if (!board) return null;
+    return { ...board, rows: this._boardRows.all(board.id) };
   }
 
   counts() {

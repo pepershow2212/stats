@@ -1,20 +1,23 @@
+import { persistTop100 } from "./leaderboard.js";
 import { applyTick, emptyState } from "./logic.js";
 import { fetchSnapshot } from "./rcon.js";
 import { enrichAvatars, enrichPlayers } from "./steam.js";
 
 export class Poller {
-  constructor({ store, servers, pollMs, steamApiKey, appId }) {
+  constructor({ store, servers, pollMs, steamApiKey, appId, dataDir }) {
     this.store = store;
     this.servers = servers;
     this.pollMs = pollMs;
     this.steamApiKey = steamApiKey;
     this.appId = appId;
+    this.dataDir = dataDir;
     this.states = new Map(servers.map((server) => [server.id, emptyState()]));
     this.live = new Map();
     this.timer = null;
     this.busy = false;
     this.steamQueue = new Set();
     this.onTick = null;
+    this.lastBoardAt = 0;
   }
 
   start() {
@@ -40,8 +43,10 @@ export class Poller {
     if (this.busy) return;
     this.busy = true;
     try {
-      await Promise.allSettled(this.servers.map((server) => this.pollServer(server)));
+      const results = await Promise.allSettled(this.servers.map((server) => this.pollServer(server)));
+      const matchEnded = results.some((result) => result.status === "fulfilled" && result.value);
       await this.flushSteam();
+      this.persistBoard(matchEnded);
       this.onTick?.();
     } finally {
       this.busy = false;
@@ -58,8 +63,9 @@ export class Poller {
         now: Date.now(),
         pollMs: this.pollMs,
       });
-      this.persist(server, state, events);
+      const matchEnded = this.persist(server, state, events);
       this.live.set(server.id, { online: true, name: status.serverName || server.name });
+      return matchEnded;
     } catch (error) {
       this.live.set(server.id, {
         online: false,
@@ -68,8 +74,21 @@ export class Poller {
     }
   }
 
+  persistBoard(force = false) {
+    if (!this.dataDir) return;
+    const now = Date.now();
+    if (!force && now - this.lastBoardAt < 10 * 60 * 1000) return;
+    try {
+      persistTop100(this.store, this.dataDir);
+      this.lastBoardAt = now;
+    } catch (error) {
+      console.warn("top100:", error instanceof Error ? error.message : error);
+    }
+  }
+
   persist(server, state, events) {
     const now = Date.now();
+    let matchEnded = false;
     for (const player of state.roster) {
       this.store.touchPlayer(server.id, player, now);
       this.steamQueue.add(player.steamId);
@@ -86,6 +105,7 @@ export class Poller {
         this.store.closeSession(server.id, event.steamId, event.at);
       }
       if (event.type === "match_end") {
+        matchEnded = true;
         for (const snapshot of event.snapshots) {
           this.store.recordMatch(server.id, snapshot, {
             map: event.map,
@@ -97,6 +117,7 @@ export class Poller {
         }
       }
     }
+    return matchEnded;
   }
 
   async flushSteam() {

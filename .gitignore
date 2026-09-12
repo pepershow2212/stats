@@ -6,6 +6,9 @@ data/*.db-journal
 data/*.db-wal
 data/*.db-shm
 data/preview-*.png
+data/top100.csv
+data/top100-*.csv
+data/prize-*.csv
 *.tgz
 *.zip
 

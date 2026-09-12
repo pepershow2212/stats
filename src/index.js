@@ -1,3 +1,4 @@
+import { dirname } from "node:path";
 import { startBot } from "./bot.js";
 import { describeCardFonts } from "./card.js";
 import { config, envFileExists, trackedServers } from "./config.js";
@@ -37,6 +38,7 @@ async function main() {
     pollMs: config.pollMs,
     steamApiKey: config.steamApiKey,
     appId: config.appId,
+    dataDir: dirname(config.databasePath),
   });
   poller.start();
   console.log(`поллер: ${servers.map((server) => server.name).join(", ")} каждые ${config.pollMs} мс`);

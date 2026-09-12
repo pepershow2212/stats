@@ -38,4 +38,40 @@ describe("store", () => {
     assert.equal(totals.players, 1);
     store.close();
   });
+
+  it("builds a saved top 100 from finished matches", () => {
+    const store = openDb(":memory:");
+    const now = Date.now();
+    for (let i = 1; i <= 12; i++) {
+      const steamId = `765611981000000${String(i).padStart(2, "0")}`;
+      store.touchPlayer("1", { steamId, name: `P${i}`, faction: "Valkyra" }, now);
+      store.recordMatch("1", {
+        steamId,
+        name: `P${i}`,
+        faction: "Valkyra",
+        kills: 20 - i,
+        deaths: 2,
+        cashEnd: 100,
+        cashPeak: 100,
+      }, {
+        map: "Kavkazi",
+        mode: "KOTH",
+        startedAt: now - 1000,
+        endedAt: now,
+        winners: i === 1 ? ["Valkyra"] : [],
+      });
+    }
+    const rows = store.top("kills", 100);
+    assert.equal(rows.length, 12);
+    assert.equal(rows[0].name, "P1");
+    assert.equal(rows[0].kills, 19);
+    assert.equal(rows[1].kills, 18);
+    const boardId = store.saveBoard(rows, { reason: "prize", frozen: 1 });
+    const saved = store.latestBoard();
+    assert.equal(saved.id, boardId);
+    assert.equal(saved.frozen, 1);
+    assert.equal(saved.rows[0].name, "P1");
+    assert.equal(saved.rows.length, 12);
+    store.close();
+  });
 });

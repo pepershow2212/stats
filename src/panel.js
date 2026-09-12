@@ -19,6 +19,7 @@ import {
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { renderPanelBanner } from "./card.js";
+import { formatTopCsv, formatTopLine, persistTop100, TOP_LIMIT } from "./leaderboard.js";
 import { formatHours, formatKd, prettyMode } from "./logic.js";
 
 const LOGO_PATH = join(dirname(fileURLToPath(import.meta.url)), "..", "assets", "wardogs-logo.png");
@@ -127,7 +128,7 @@ export async function panelMessage(poller, servers, totals = {}) {
 
   container
     .addSeparatorComponents(line(true))
-    .addTextDisplayComponents(txt("-# Стата, топ и онлайн приходят в ЛС · кнопки раз в минуту"))
+    .addTextDisplayComponents(txt("-# Стата, топ-100 и онлайн в ЛС · кнопки раз в минуту · /приз фиксирует список"))
     .addActionRowComponents(panelButtons());
 
   return { components: [container], files, flags: V2 };
@@ -202,31 +203,33 @@ export function statsTextMessage(store, player, view) {
   };
 }
 
-export function topMessage(store, metric = "kills") {
-  const rows = store.top(metric, 10);
+export function topMessage(store, metric = "kills", { frozen = false, fileDir = "" } = {}) {
+  const saved = fileDir
+    ? persistTop100(store, fileDir, { reason: frozen ? "prize" : "auto", frozen, metric })
+    : { rows: store.top(metric, TOP_LIMIT), file: null };
+  const rows = saved.rows;
   if (!rows.length) return null;
-  const lines = rows.map((row, index) => {
-    const value = {
-      kills: `**${row.kills}** · ${formatKd(row.kills, row.deaths)}`,
-      deaths: String(row.deaths),
-      hours: formatHours(row.seconds_played),
-      cash: `$${row.cash_peak_best}`,
-      wins: `**${row.wins}** / ${row.matches}`,
-      matches: `**${row.matches}** игр · ${row.wins} побед`,
-      kd: `**${formatKd(row.kills, row.deaths)}** · ${row.kills}/${row.deaths}`,
-    }[metric];
-    return `\`${String(index + 1).padStart(2, "0")}\`  **${row.name}**  —  ${value}`;
-  });
+  const title = frozen ? `# Топ ${rows.length} · призы` : `# Топ ${rows.length} · ${METRIC_LABEL[metric] || metric}`;
+  const note = frozen
+    ? `Зафиксировано для выдачи призов · ${rows.length} игроков`
+    : `По завершённым матчам · ${rows.length} из ${TOP_LIMIT} · CSV во вложении`;
   const container = new ContainerBuilder()
     .setAccentColor(COLOR)
     .addSectionComponents(
       new SectionBuilder()
-        .addTextDisplayComponents(txt(`# Топ · ${METRIC_LABEL[metric] || metric}`), txt("С наших серверов WARDOGS RUSSIA"))
+        .addTextDisplayComponents(txt(title), txt(note))
         .setThumbnailAccessory(logoThumb()),
-    )
-    .addSeparatorComponents(line())
-    .addTextDisplayComponents(txt(lines.join("\n")));
-  return { components: [container], files: [logoFile()], flags: V2 };
+    );
+  for (let i = 0; i < rows.length; i += 20) {
+    container.addSeparatorComponents(line());
+    container.addTextDisplayComponents(
+      txt(rows.slice(i, i + 20).map((row, offset) => formatTopLine(row, i + offset, metric)).join("\n")),
+    );
+  }
+  const files = [logoFile()];
+  const csvName = frozen ? `prize-top100.csv` : `top100-${metric}.csv`;
+  files.push(new AttachmentBuilder(Buffer.from(formatTopCsv(rows, { metric }), "utf8"), { name: csvName }));
+  return { components: [container], files, flags: V2 };
 }
 
 export function liveMessage(poller, servers) {

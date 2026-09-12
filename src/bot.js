@@ -9,6 +9,8 @@ import {
   Routes,
   SlashCommandBuilder,
 } from "discord.js";
+import { dirname } from "node:path";
+import { config } from "./config.js";
 import { renderStatsCard } from "./card.js";
 import { fetchCommunityProfile } from "./steam.js";
 import { Cooldown } from "./cooldown.js";
@@ -111,7 +113,17 @@ export function buildCommands(servers) {
     .setDescription("Постоянная панель статистики внизу канала")
     .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild);
 
-  return [stats, top, live, link, unlink, panel];
+  const prize = new SlashCommandBuilder()
+    .setName("приз")
+    .setDescription("Freeze top 100 for prizes")
+    .setDescriptionLocalization("ru", "Зафиксировать топ-100 на выдачу призов")
+    .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild);
+
+  return [stats, top, live, link, unlink, panel, prize];
+}
+
+function dataDir() {
+  return dirname(config.databasePath);
 }
 
 export async function startBot({ token, clientId, guildId, store, poller, servers }) {
@@ -269,6 +281,8 @@ export async function startBot({ token, clientId, guildId, store, poller, server
       else if (interaction.commandName === "панель") {
         await placePanel(interaction.channel, store, poller, servers);
         await interaction.reply({ content: "Панель внизу канала.", flags: MessageFlags.Ephemeral });
+      } else if (interaction.commandName === "приз") {
+        await cmdPrize(interaction, store);
       }
     } catch (error) {
       console.error("command", interaction.commandName || interaction.customId, error);
@@ -380,12 +394,21 @@ async function cmdStats(interaction, store, poller, servers) {
 
 async function cmdTop(interaction, store, metric) {
   const picked = metric || interaction.options?.getString?.("метрика") || "kills";
-  const payload = topMessage(store, picked);
+  const payload = topMessage(store, picked, { fileDir: dataDir() });
   if (!payload) {
     await interaction.reply({ content: "Пока пусто — статистика копится с конца матчей.", flags: MessageFlags.Ephemeral });
     return false;
   }
-  return replyPrivate(interaction, payload, "Топ в личке.");
+  return replyPrivate(interaction, payload, "Топ-100 в личке, CSV во вложении.");
+}
+
+async function cmdPrize(interaction, store) {
+  const payload = topMessage(store, "kills", { frozen: true, fileDir: dataDir() });
+  if (!payload) {
+    await interaction.reply({ content: "Пока некого фиксировать — нет завершённых матчей.", flags: MessageFlags.Ephemeral });
+    return;
+  }
+  await replyPrivate(interaction, payload, "Топ-100 зафиксирован. CSV в личке — по нему выдавай призы.");
 }
 
 async function cmdLive(interaction, poller, servers) {
