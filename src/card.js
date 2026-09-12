@@ -1,6 +1,20 @@
-import { createCanvas, loadImage } from "@napi-rs/canvas";
+import { createCanvas, GlobalFonts, loadImage } from "@napi-rs/canvas";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+
+const FONT_DIR = join(dirname(fileURLToPath(import.meta.url)), "..", "assets", "fonts");
+const FONT = "WD Sans";
+try {
+  GlobalFonts.registerFromPath(join(FONT_DIR, "NotoSans-Regular.ttf"), FONT);
+  GlobalFonts.registerFromPath(join(FONT_DIR, "NotoSans-Bold.ttf"), FONT);
+  GlobalFonts.registerFromPath(join(FONT_DIR, "NotoSans-ExtraBold.ttf"), FONT);
+} catch (error) {
+  console.warn("fonts:", error.message);
+}
+
+function fontFace() {
+  return `"${FONT}", "Noto Sans", "DejaVu Sans", "Segoe UI", Arial, sans-serif`;
+}
 
 const COVER_PATH = join(dirname(fileURLToPath(import.meta.url)), "..", "assets", "wardogs-cover.jpg");
 const LOGO_PATH = join(dirname(fileURLToPath(import.meta.url)), "..", "assets", "wardogs-logo.png");
@@ -96,7 +110,7 @@ function text(ctx, value, x, y, { size = 28, color = WHITE, align = "left", weig
   ctx.fillStyle = color;
   ctx.textAlign = align;
   ctx.textBaseline = "alphabetic";
-  ctx.font = `${italic ? "italic " : ""}${weight} ${size}px "Segoe UI", "Arial"`;
+  ctx.font = `${italic ? "italic " : ""}${weight} ${size}px ${fontFace()}`;
   ctx.fillText(String(value ?? "—"), x, y);
   ctx.restore();
 }
@@ -104,7 +118,7 @@ function text(ctx, value, x, y, { size = 28, color = WHITE, align = "left", weig
 function fitName(ctx, value, maxWidth) {
   let size = 54;
   while (size > 28) {
-    ctx.font = `800 ${size}px "Segoe UI", "Arial"`;
+    ctx.font = `800 ${size}px ${fontFace()}`;
     if (ctx.measureText(value).width <= maxWidth) return size;
     size -= 2;
   }
