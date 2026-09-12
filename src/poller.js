@@ -99,7 +99,7 @@ export class Poller {
         this.store.openSession(server.id, event.player.steamId, event.at);
       }
       if (event.type === "tick_time") {
-        this.store.addSeconds(event.steamId, Math.round(event.ms / 1000));
+        this.store.addSeconds(event.steamId, Math.round(event.ms / 1000), server.id);
       }
       if (event.type === "leave") {
         this.store.closeSession(server.id, event.steamId, event.at);

@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
   applyTick,
+  detectKillReset,
   detectMatchReset,
   emptyState,
   formatHours,
@@ -39,6 +40,9 @@ describe("helpers", () => {
     assert.equal(detectMatchReset({ matchSeconds: 400, map: "Kavkazi" }, { matchSeconds: 8, map: "Kavkazi" }), true);
     assert.equal(detectMatchReset({ matchSeconds: 40, map: "Kavkazi" }, { matchSeconds: 44, map: "Kavkazi" }), false);
     assert.equal(detectMatchReset({ matchSeconds: 100, map: "Kavkazi" }, { matchSeconds: 120, map: "Europe" }), true);
+    assert.equal(detectMatchReset({ map: "Kavkazi", lighting: "DayClear" }, { map: "Kavkazi", lighting: "Night" }), true);
+    assert.equal(detectKillReset([{ kills: 12 }, { kills: 8 }], [{ kills: 0 }, { kills: 1 }]), true);
+    assert.equal(detectKillReset([{ kills: 3 }], [{ kills: 4 }, { kills: 2 }]), false);
   });
 
   it("picks winning factions", () => {

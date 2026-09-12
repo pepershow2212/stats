@@ -17,9 +17,16 @@ export function normalizePlayer(raw) {
 export function detectMatchReset(prev, next) {
   if (!prev || !next) return false;
   if (prev.map && next.map && prev.map !== next.map) return true;
+  if (prev.lighting && next.lighting && prev.lighting !== next.lighting) return true;
   const a = Number(prev.matchSeconds) || 0;
   const b = Number(next.matchSeconds) || 0;
   return a >= 45 && b < 40 && b + 20 < a;
+}
+
+export function detectKillReset(held, incoming) {
+  const prevKills = (held || []).reduce((sum, row) => sum + (Number(row.kills) || 0), 0);
+  const nextKills = (incoming || []).reduce((sum, row) => sum + (Number(row.kills) || 0), 0);
+  return incoming.length >= 2 && prevKills >= 10 && nextKills <= 4 && nextKills < prevKills * 0.35;
 }
 
 export function winningFactions(factionScores) {
@@ -79,7 +86,8 @@ export function applyTick(state, input) {
   const prevIds = new Set(state.online.keys());
   const events = [];
 
-  const matchReset = detectMatchReset(state.status, status);
+  const matchReset =
+    detectMatchReset(state.status, status) || detectKillReset([...state.match.bySteam.values()], players);
   if (matchReset) {
     events.push({
       type: "match_end",
@@ -144,6 +152,7 @@ export function applyTick(state, input) {
     map: status.map || "",
     experiences: status.experiences || [],
     matchSeconds: Number(status.matchSeconds) || 0,
+    lighting: status.lighting || "",
     factionScores: status.factionScores || [],
     players: status.players || { current: players.length, max: 0 },
   };

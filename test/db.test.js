@@ -74,4 +74,49 @@ describe("store", () => {
     assert.equal(saved.rows.length, 12);
     store.close();
   });
+
+  it("keeps per-server stats and an overall top", () => {
+    const store = openDb(":memory:");
+    const now = Date.now();
+    store.touchPlayer("1", { steamId: "76561198100000001", name: "Nomad", faction: "Valkyra" }, now);
+    store.touchPlayer("2", { steamId: "76561198100000001", name: "Nomad", faction: "Valkyra" }, now);
+    store.touchPlayer("2", { steamId: "76561198100000002", name: "Ghost", faction: "Lonestar" }, now);
+    store.recordMatch("1", {
+      steamId: "76561198100000001",
+      name: "Nomad",
+      faction: "Valkyra",
+      kills: 5,
+      deaths: 1,
+      cashEnd: 100,
+      cashPeak: 100,
+    }, { map: "Kavkazi", mode: "KOTH", startedAt: now - 1000, endedAt: now, winners: ["Valkyra"] });
+    store.recordMatch("2", {
+      steamId: "76561198100000001",
+      name: "Nomad",
+      faction: "Valkyra",
+      kills: 7,
+      deaths: 2,
+      cashEnd: 100,
+      cashPeak: 100,
+    }, { map: "Ozeteti", mode: "KOTH", startedAt: now - 1000, endedAt: now, winners: [] });
+    store.recordMatch("2", {
+      steamId: "76561198100000002",
+      name: "Ghost",
+      faction: "Lonestar",
+      kills: 9,
+      deaths: 3,
+      cashEnd: 100,
+      cashPeak: 100,
+    }, { map: "Ozeteti", mode: "KOTH", startedAt: now - 1000, endedAt: now, winners: [] });
+    const overall = store.top("kills", 100);
+    assert.equal(overall[0].name, "Nomad");
+    assert.equal(overall[0].kills, 12);
+    assert.equal(overall[1].name, "Ghost");
+    assert.equal(overall[1].kills, 9);
+    const server2 = store.top("kills", 100, "2");
+    assert.equal(server2[0].name, "Ghost");
+    assert.equal(server2[0].kills, 9);
+    assert.equal(server2[1].kills, 7);
+    store.close();
+  });
 });

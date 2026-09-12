@@ -83,12 +83,50 @@ CREATE TABLE IF NOT EXISTS prize_board_rows (
   FOREIGN KEY (board_id) REFERENCES prize_boards(id) ON DELETE CASCADE
 );
 
+CREATE TABLE IF NOT EXISTS server_stats (
+  steam_id TEXT NOT NULL,
+  server_id TEXT NOT NULL,
+  name TEXT NOT NULL DEFAULT '',
+  kills INTEGER NOT NULL DEFAULT 0,
+  deaths INTEGER NOT NULL DEFAULT 0,
+  wins INTEGER NOT NULL DEFAULT 0,
+  matches INTEGER NOT NULL DEFAULT 0,
+  seconds_played INTEGER NOT NULL DEFAULT 0,
+  cash_peak_best INTEGER NOT NULL DEFAULT 0,
+  last_seen INTEGER NOT NULL DEFAULT 0,
+  PRIMARY KEY (steam_id, server_id)
+);
+
 CREATE INDEX IF NOT EXISTS idx_players_kills ON players(kills DESC);
 CREATE INDEX IF NOT EXISTS idx_players_hours ON players(seconds_played DESC);
 CREATE INDEX IF NOT EXISTS idx_match_steam ON match_stats(steam_id, ended_at);
 CREATE INDEX IF NOT EXISTS idx_sessions_open ON sessions(server_id, left_at);
 CREATE INDEX IF NOT EXISTS idx_prize_boards_created ON prize_boards(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_server_stats_kills ON server_stats(server_id, kills DESC);
 `;
+
+function backfillServerStats(db) {
+  db.exec(`
+    INSERT INTO server_stats (steam_id, server_id, name, kills, deaths, wins, matches, cash_peak_best, last_seen)
+    SELECT steam_id, server_id, MAX(name), SUM(kills), SUM(deaths), SUM(won), COUNT(*), MAX(cash_peak), MAX(ended_at)
+    FROM match_stats
+    GROUP BY steam_id, server_id
+    ON CONFLICT(steam_id, server_id) DO UPDATE SET
+      kills = excluded.kills,
+      deaths = excluded.deaths,
+      wins = excluded.wins,
+      matches = excluded.matches,
+      cash_peak_best = MAX(server_stats.cash_peak_best, excluded.cash_peak_best)
+    WHERE server_stats.kills < excluded.kills OR server_stats.matches < excluded.matches;
+
+    INSERT INTO server_stats (steam_id, server_id, name, seconds_played, last_seen)
+    SELECT steam_id, server_id, '', COALESCE(SUM(seconds), 0), MAX(COALESCE(left_at, joined_at))
+    FROM sessions
+    GROUP BY steam_id, server_id
+    ON CONFLICT(steam_id, server_id) DO UPDATE SET
+      seconds_played = MAX(server_stats.seconds_played, excluded.seconds_played);
+  `);
+}
 
 export function openDb(path) {
   mkdirSync(dirname(path), { recursive: true });
@@ -96,6 +134,7 @@ export function openDb(path) {
   db.pragma("journal_mode = WAL");
   db.pragma("foreign_keys = ON");
   db.exec(SCHEMA);
+  backfillServerStats(db);
   return new StatsStore(db);
 }
 
@@ -113,6 +152,27 @@ export class StatsStore {
     `);
     this._addTime = db.prepare(`
       UPDATE players SET seconds_played = seconds_played + @seconds WHERE steam_id = @steamId
+    `);
+    this._touchServer = db.prepare(`
+      INSERT INTO server_stats (steam_id, server_id, name, last_seen)
+      VALUES (@steamId, @serverId, @name, @now)
+      ON CONFLICT(steam_id, server_id) DO UPDATE SET
+        name = CASE WHEN excluded.name != '' THEN excluded.name ELSE server_stats.name END,
+        last_seen = excluded.last_seen
+    `);
+    this._addServerTime = db.prepare(`
+      UPDATE server_stats
+      SET seconds_played = seconds_played + @seconds
+      WHERE steam_id = @steamId AND server_id = @serverId
+    `);
+    this._applyServerMatch = db.prepare(`
+      UPDATE server_stats SET
+        kills = kills + @kills,
+        deaths = deaths + @deaths,
+        matches = matches + 1,
+        wins = wins + @won,
+        cash_peak_best = MAX(cash_peak_best, @cashPeak)
+      WHERE steam_id = @steamId AND server_id = @serverId
     `);
     this._openSession = db.prepare(`
       INSERT INTO sessions (steam_id, server_id, joined_at) VALUES (@steamId, @serverId, @at)
@@ -250,11 +310,18 @@ export class StatsStore {
       serverId,
       now,
     });
+    this._touchServer.run({
+      steamId: player.steamId,
+      serverId,
+      name: player.name || "",
+      now,
+    });
   }
 
-  addSeconds(steamId, seconds) {
+  addSeconds(steamId, seconds, serverId) {
     if (seconds <= 0) return;
     this._addTime.run({ steamId, seconds });
+    if (serverId) this._addServerTime.run({ steamId, serverId, seconds });
   }
 
   openSession(serverId, steamId, at) {
@@ -284,6 +351,13 @@ export class StatsStore {
     };
     this._insertMatch.run(row);
     this._applyMatch.run(row);
+    this._touchServer.run({
+      steamId: row.steamId,
+      serverId: row.serverId,
+      name: row.name,
+      now: row.endedAt,
+    });
+    this._applyServerMatch.run(row);
   }
 
   link(discordId, steamId, at) {
@@ -336,55 +410,39 @@ export class StatsStore {
       .all(like, like);
   }
 
-  top(metric, limit = 100) {
+  top(metric, limit = 100, serverId = "") {
     const n = Math.min(100, Math.max(1, Number(limit) || 100));
-    const board = `
-      SELECT p.steam_id, p.name, p.seconds_played, p.cash_peak_best,
-             COALESCE(m.kills, 0) AS kills,
-             COALESCE(m.deaths, 0) AS deaths,
-             COALESCE(m.wins, 0) AS wins,
-             COALESCE(m.matches, 0) AS matches
-      FROM players p
-      LEFT JOIN (
-        SELECT steam_id,
-               SUM(kills) AS kills,
-               SUM(deaths) AS deaths,
-               SUM(won) AS wins,
-               COUNT(*) AS matches
-        FROM match_stats
-        GROUP BY steam_id
-      ) m ON m.steam_id = p.steam_id
-    `;
-    const kdExpr = `(CAST(COALESCE(m.kills, 0) AS REAL) / CASE WHEN COALESCE(m.deaths, 0) = 0 THEN 1 ELSE m.deaths END)`;
+    const scope = String(serverId || "").replace(/[^\w-]/g, "");
+    const board = scope
+      ? `
+        SELECT p.steam_id, p.name, s.seconds_played, s.cash_peak_best,
+               s.kills, s.deaths, s.wins, s.matches
+        FROM server_stats s
+        JOIN players p ON p.steam_id = s.steam_id
+        WHERE s.server_id = '${scope}'
+      `
+      : `
+        SELECT p.steam_id, p.name,
+               SUM(s.seconds_played) AS seconds_played,
+               MAX(s.cash_peak_best) AS cash_peak_best,
+               SUM(s.kills) AS kills,
+               SUM(s.deaths) AS deaths,
+               SUM(s.wins) AS wins,
+               SUM(s.matches) AS matches
+        FROM server_stats s
+        JOIN players p ON p.steam_id = s.steam_id
+        GROUP BY p.steam_id
+      `;
+    const inner = `SELECT * FROM (${board}) t`;
+    const kdExpr = `(CAST(t.kills AS REAL) / CASE WHEN t.deaths = 0 THEN 1 ELSE t.deaths END)`;
     const sql = {
-      kills: `${board}
-        WHERE COALESCE(m.kills, 0) > 0
-        ORDER BY kills DESC, ${kdExpr} DESC, p.seconds_played DESC
-        LIMIT ${n}`,
-      deaths: `${board}
-        WHERE COALESCE(m.deaths, 0) > 0
-        ORDER BY deaths DESC, kills DESC
-        LIMIT ${n}`,
-      hours: `${board}
-        WHERE p.seconds_played > 0
-        ORDER BY p.seconds_played DESC, kills DESC
-        LIMIT ${n}`,
-      cash: `${board}
-        WHERE p.cash_peak_best > 0
-        ORDER BY p.cash_peak_best DESC, kills DESC
-        LIMIT ${n}`,
-      wins: `${board}
-        WHERE COALESCE(m.wins, 0) > 0
-        ORDER BY wins DESC, matches DESC, kills DESC
-        LIMIT ${n}`,
-      matches: `${board}
-        WHERE COALESCE(m.matches, 0) > 0
-        ORDER BY matches DESC, wins DESC, kills DESC
-        LIMIT ${n}`,
-      kd: `${board}
-        WHERE COALESCE(m.matches, 0) >= 3 AND (COALESCE(m.kills, 0) + COALESCE(m.deaths, 0)) >= 8
-        ORDER BY ${kdExpr} DESC, kills DESC
-        LIMIT ${n}`,
+      kills: `${inner} WHERE t.kills > 0 ORDER BY t.kills DESC, ${kdExpr} DESC, t.seconds_played DESC LIMIT ${n}`,
+      deaths: `${inner} WHERE t.deaths > 0 ORDER BY t.deaths DESC, t.kills DESC LIMIT ${n}`,
+      hours: `${inner} WHERE t.seconds_played > 0 ORDER BY t.seconds_played DESC, t.kills DESC LIMIT ${n}`,
+      cash: `${inner} WHERE t.cash_peak_best > 0 ORDER BY t.cash_peak_best DESC, t.kills DESC LIMIT ${n}`,
+      wins: `${inner} WHERE t.wins > 0 ORDER BY t.wins DESC, t.matches DESC, t.kills DESC LIMIT ${n}`,
+      matches: `${inner} WHERE t.matches > 0 ORDER BY t.matches DESC, t.wins DESC, t.kills DESC LIMIT ${n}`,
+      kd: `${inner} WHERE t.matches >= 3 AND (t.kills + t.deaths) >= 8 ORDER BY ${kdExpr} DESC, t.kills DESC LIMIT ${n}`,
     }[metric];
     if (!sql) return [];
     return this.db.prepare(sql).all();

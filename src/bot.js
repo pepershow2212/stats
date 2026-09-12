@@ -74,6 +74,13 @@ export function buildCommands(servers) {
         .setDescription("What to rank")
         .setDescriptionLocalization("ru", "Что ранжировать")
         .addChoices(...METRICS),
+    )
+    .addStringOption((option) =>
+      option
+        .setName("сервер")
+        .setDescription("All servers or one")
+        .setDescriptionLocalization("ru", "Все серверы или один")
+        .addChoices({ name: "Все серверы", value: "all" }, ...choices),
     );
 
   const live = new SlashCommandBuilder()
@@ -247,7 +254,7 @@ export async function startBot({ token, clientId, guildId, store, poller, server
       }
       if (interaction.isButton() && interaction.customId === PANEL_TOP) {
         if (await denyCooldown(interaction)) return;
-        if (await cmdTop(interaction, store, "kills")) usageCd.hit(interaction.user.id);
+        if (await cmdTop(interaction, store, servers, "kills")) usageCd.hit(interaction.user.id);
         await bumpPanel(interaction.channel, store, poller, servers);
         return;
       }
@@ -271,7 +278,7 @@ export async function startBot({ token, clientId, guildId, store, poller, server
         if (await cmdStats(interaction, store, poller, servers)) usageCd.hit(interaction.user.id);
       } else if (interaction.commandName === "top") {
         if (await denyCooldown(interaction)) return;
-        if (await cmdTop(interaction, store, interaction.options.getString("метрика"))) usageCd.hit(interaction.user.id);
+        if (await cmdTop(interaction, store, servers, interaction.options.getString("метрика"))) usageCd.hit(interaction.user.id);
       } else if (interaction.commandName === "live") {
         if (await denyCooldown(interaction)) return;
         if (await cmdLive(interaction, poller, servers)) usageCd.hit(interaction.user.id);
@@ -392,14 +399,22 @@ async function cmdStats(interaction, store, poller, servers) {
   return replyStats(interaction, store, poller, servers, interaction.options.getString("ник"));
 }
 
-async function cmdTop(interaction, store, metric) {
+async function cmdTop(interaction, store, servers, metric) {
   const picked = metric || interaction.options?.getString?.("метрика") || "kills";
-  const payload = topMessage(store, picked, { fileDir: dataDir() });
+  const scope = interaction.options?.getString?.("сервер") || "all";
+  const serverId = scope && scope !== "all" ? scope : "";
+  const scopeName = serverId
+    ? servers.find((server) => server.id === serverId)?.name || `Сервер ${serverId}`
+    : "все серверы";
+  const payload = topMessage(store, picked, { fileDir: dataDir(), serverId, scopeName });
   if (!payload) {
-    await interaction.reply({ content: "Пока пусто — статистика копится с конца матчей.", flags: MessageFlags.Ephemeral });
+    await interaction.reply({
+      content: "Пока пусто — база копится с конца матчей по каждому серверу. Общий топ-100 появится сам.",
+      flags: MessageFlags.Ephemeral,
+    });
     return false;
   }
-  return replyPrivate(interaction, payload, "Топ-100 в личке, CSV во вложении.");
+  return replyPrivate(interaction, payload, `Топ-100 (${scopeName}) в личке.`);
 }
 
 async function cmdPrize(interaction, store) {

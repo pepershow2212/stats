@@ -48,8 +48,8 @@ export function formatTopLine(row, index, metric) {
   return `\`${place}\`  **${row.name}**  —  ${value}`;
 }
 
-export function persistTop100(store, dir, { reason = "auto", frozen = false, metric = "kills" } = {}) {
-  const rows = store.top(metric, TOP_LIMIT);
+export function persistTop100(store, dir, { reason = "auto", frozen = false, metric = "kills", serverId = "" } = {}) {
+  const rows = store.top(metric, TOP_LIMIT, serverId);
   if (!rows.length) return { rows: [], file: null, boardId: null };
   const boardId = store.saveBoard(rows, { reason, frozen: frozen ? 1 : 0 });
   mkdirSync(dir, { recursive: true });

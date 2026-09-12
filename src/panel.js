@@ -203,16 +203,18 @@ export function statsTextMessage(store, player, view) {
   };
 }
 
-export function topMessage(store, metric = "kills", { frozen = false, fileDir = "" } = {}) {
+export function topMessage(store, metric = "kills", { frozen = false, fileDir = "", serverId = "", scopeName = "все серверы" } = {}) {
   const saved = fileDir
-    ? persistTop100(store, fileDir, { reason: frozen ? "prize" : "auto", frozen, metric })
-    : { rows: store.top(metric, TOP_LIMIT), file: null };
+    ? persistTop100(store, fileDir, { reason: frozen ? "prize" : "auto", frozen, metric, serverId })
+    : { rows: store.top(metric, TOP_LIMIT, serverId), file: null };
   const rows = saved.rows;
   if (!rows.length) return null;
-  const title = frozen ? `# Топ ${rows.length} · призы` : `# Топ ${rows.length} · ${METRIC_LABEL[metric] || metric}`;
+  const title = frozen
+    ? `# Топ ${rows.length} · призы · ${scopeName}`
+    : `# Топ ${rows.length} · ${METRIC_LABEL[metric] || metric} · ${scopeName}`;
   const note = frozen
-    ? `Зафиксировано для выдачи призов · ${rows.length} игроков`
-    : `По завершённым матчам · ${rows.length} из ${TOP_LIMIT} · CSV во вложении`;
+    ? `Зафиксировано из базы · ${rows.length} игроков`
+    : `Из базы по серверам · ${rows.length} из ${TOP_LIMIT} · копится с конца матчей`;
   const container = new ContainerBuilder()
     .setAccentColor(COLOR)
     .addSectionComponents(
