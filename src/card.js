@@ -177,10 +177,15 @@ function roundRect(ctx, x, y, w, h, r) {
 }
 
 function fillPanel(ctx, x, y, w, h, r = 16) {
-  ctx.fillStyle = "rgba(8, 6, 4, 0.88)";
+  ctx.save();
+  ctx.shadowColor = "rgba(0, 0, 0, 0.55)";
+  ctx.shadowBlur = 16;
+  ctx.shadowOffsetY = 3;
+  ctx.fillStyle = "#100e0b";
   roundRect(ctx, x, y, w, h, r);
   ctx.fill();
-  ctx.strokeStyle = "rgba(232, 163, 23, 0.22)";
+  ctx.restore();
+  ctx.strokeStyle = "rgba(232, 163, 23, 0.32)";
   ctx.lineWidth = 1.5;
   roundRect(ctx, x, y, w, h, r);
   ctx.stroke();
@@ -459,20 +464,18 @@ export async function renderStatsCard(view) {
   ctx.fillStyle = fill;
   roundRect(ctx, barX, barY, Math.max(18, barW * (view.rank?.progress || 0)), barH, 8);
   ctx.fill();
-  text(ctx, `${(view.rank?.have || 0).toFixed(1)} / ${view.rank?.need || 0} ч`, barX + barW / 2, barY + 13, {
-    size: 14,
+  text(ctx, `${(view.rank?.have || 0).toFixed(1)} / ${view.rank?.need || 0} ч`, barX + barW / 2, barY + 38, {
+    size: 16,
     align: "center",
-    color: "#1a1206",
+    color: WHITE,
     weight: "700",
   });
-  text(ctx, "Текущий ранг", barX, barY + 42, { size: 16, color: MUTED, weight: "500" });
-  text(ctx, "Следующий ранг", barX + barW, barY + 42, { size: 16, color: MUTED, align: "right", weight: "500" });
-  text(ctx, view.rank?.name || "Рекрут", barX, barY + 68, { size: 20, color: ORANGE, weight: "700" });
-  text(ctx, view.rank?.nextName || view.rank?.name || "—", barX + barW, barY + 68, {
-    size: 20,
-    color: MUTED,
-    align: "right",
-  });
+  fillPanel(ctx, barX, barY + 50, 388, 58, 14);
+  fillPanel(ctx, barX + 412, barY + 50, 388, 58, 14);
+  text(ctx, "Текущий ранг", barX + 20, barY + 72, { size: 14, color: MUTED, weight: "500" });
+  text(ctx, view.rank?.name || "Рекрут", barX + 20, barY + 96, { size: 20, color: ORANGE, weight: "700" });
+  text(ctx, "Следующий ранг", barX + 432, barY + 72, { size: 14, color: MUTED, weight: "500" });
+  text(ctx, view.rank?.nextName || view.rank?.name || "—", barX + 432, barY + 96, { size: 20, color: WHITE, weight: "700" });
 
   const tiles = [
     ["games", "Всего игр", String(view.games ?? view.matches)],
@@ -491,7 +494,7 @@ export async function renderStatsCard(view) {
     const col = index % 4;
     const row = Math.floor(index / 4);
     const x = 48 + col * (tileW + tileGap);
-    const y = 244 + row * (tileH + tileGap);
+    const y = 272 + row * (tileH + tileGap);
     fillPanel(ctx, x, y, tileW, tileH);
     drawIcon(ctx, tile[0], x + 16, y + 14, 18);
     text(ctx, tile[1], x + 42, y + 30, { size: 15, color: MUTED, weight: "500" });
@@ -504,11 +507,6 @@ export async function renderStatsCard(view) {
     }
     text(ctx, value, x + 16, y + 64, { size: valueSize, weight: "700" });
   });
-
-  drawIcon(ctx, "rank", 48, 430, 24);
-  text(ctx, view.rank?.name || "Рекрут", 82, 450, { size: 22, color: WHITE, weight: "700" });
-  drawIcon(ctx, "faction", 250, 430, 22, MUTED);
-  text(ctx, view.faction || "—", 282, 450, { size: 20, color: MUTED });
 
   const boxes = [
     { x: 48, icon: "wins", title: "Победы", value: `${view.winrate}%`, sub: `K/D  ${view.kd}` },
