@@ -39,7 +39,7 @@ export const config = {
   discordGuildId: env("DISCORD_GUILD_ID"),
   steamApiKey: env("STEAM_API_KEY"),
   appId: env("WARDOGS_APP_ID", "1867240"),
-  databasePath: resolve(root, env("DATABASE_PATH", "./data/stats.db")),
+  databasePath: resolve(root, env("DATABASE_PATH", process.env.DATA_DIR ? `${process.env.DATA_DIR}/stats.db` : "./data/stats.db")),
   pollMs: Math.max(2000, Number(env("POLL_INTERVAL_MS", "4000")) || 4000),
   mockRcon: flag("MOCK_RCON") || argv.has("--mock"),
   pollerOnly: argv.has("--poller-only"),
