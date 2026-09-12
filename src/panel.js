@@ -82,11 +82,9 @@ function panelButtons() {
 }
 
 function serverBlock(snap) {
-  const top = snap.top?.length ? snap.top.join("\n") : "_пока пусто_";
   return [
     `## ${snap.name}`,
     `**${snap.online}** / **${snap.max}** онлайн · ${snap.map} · ${snap.mode || "матч"} · ${snap.matchMin}м`,
-    `Топ матча\n${top}`,
   ].join("\n");
 }
 
@@ -128,7 +126,7 @@ export async function panelMessage(poller, servers, totals = {}) {
 
   container
     .addSeparatorComponents(line(true))
-    .addTextDisplayComponents(txt("-# Стата, топ-100 и онлайн в ЛС · кнопки раз в минуту · /приз фиксирует список"))
+    .addTextDisplayComponents(txt("-# Топ — 100 игроков из базы · кнопки раз в минуту"))
     .addActionRowComponents(panelButtons());
 
   return { components: [container], files, flags: V2 };
@@ -211,10 +209,10 @@ export function topMessage(store, metric = "kills", { frozen = false, fileDir = 
   if (!rows.length) return null;
   const title = frozen
     ? `# Топ ${rows.length} · призы · ${scopeName}`
-    : `# Топ ${rows.length} · ${METRIC_LABEL[metric] || metric} · ${scopeName}`;
+    : `# Топ ${rows.length} из базы · ${METRIC_LABEL[metric] || metric}`;
   const note = frozen
     ? `Зафиксировано из базы · ${rows.length} игроков`
-    : `Из базы по серверам · ${rows.length} из ${TOP_LIMIT} · копится с конца матчей`;
+    : `${scopeName} · ${rows.length} из ${TOP_LIMIT}`;
   const container = new ContainerBuilder()
     .setAccentColor(COLOR)
     .addSectionComponents(

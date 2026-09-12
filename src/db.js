@@ -436,7 +436,7 @@ export class StatsStore {
     const inner = `SELECT * FROM (${board}) t`;
     const kdExpr = `(CAST(t.kills AS REAL) / CASE WHEN t.deaths = 0 THEN 1 ELSE t.deaths END)`;
     const sql = {
-      kills: `${inner} WHERE t.kills > 0 ORDER BY t.kills DESC, ${kdExpr} DESC, t.seconds_played DESC LIMIT ${n}`,
+      kills: `${inner} ORDER BY t.kills DESC, ${kdExpr} DESC, t.seconds_played DESC LIMIT ${n}`,
       deaths: `${inner} WHERE t.deaths > 0 ORDER BY t.deaths DESC, t.kills DESC LIMIT ${n}`,
       hours: `${inner} WHERE t.seconds_played > 0 ORDER BY t.seconds_played DESC, t.kills DESC LIMIT ${n}`,
       cash: `${inner} WHERE t.cash_peak_best > 0 ORDER BY t.cash_peak_best DESC, t.kills DESC LIMIT ${n}`,
@@ -445,7 +445,14 @@ export class StatsStore {
       kd: `${inner} WHERE t.matches >= 3 AND (t.kills + t.deaths) >= 8 ORDER BY ${kdExpr} DESC, t.kills DESC LIMIT ${n}`,
     }[metric];
     if (!sql) return [];
-    return this.db.prepare(sql).all();
+    const rows = this.db.prepare(sql).all();
+    if (rows.length || scope) return rows;
+    return this.db.prepare(`
+      SELECT steam_id, name, seconds_played, cash_peak_best, kills, deaths, wins, matches
+      FROM players
+      ORDER BY kills DESC, seconds_played DESC, last_seen DESC
+      LIMIT ${n}
+    `).all();
   }
 
   saveBoard(rows, { reason = "auto", frozen = 0, at = Date.now() } = {}) {

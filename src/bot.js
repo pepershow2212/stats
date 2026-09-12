@@ -409,7 +409,7 @@ async function cmdTop(interaction, store, servers, metric) {
   const payload = topMessage(store, picked, { fileDir: dataDir(), serverId, scopeName });
   if (!payload) {
     await interaction.reply({
-      content: "Пока пусто — база копится с конца матчей по каждому серверу. Общий топ-100 появится сам.",
+      content: "В базе пока никого нет.",
       flags: MessageFlags.Ephemeral,
     });
     return false;
