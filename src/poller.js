@@ -1,0 +1,121 @@
+import { applyTick, emptyState } from "./logic.js";
+import { fetchSnapshot } from "./rcon.js";
+import { enrichPlayers } from "./steam.js";
+
+export class Poller {
+  constructor({ store, servers, pollMs, steamApiKey, appId }) {
+    this.store = store;
+    this.servers = servers;
+    this.pollMs = pollMs;
+    this.steamApiKey = steamApiKey;
+    this.appId = appId;
+    this.states = new Map(servers.map((server) => [server.id, emptyState()]));
+    this.live = new Map();
+    this.timer = null;
+    this.busy = false;
+    this.steamQueue = new Set();
+    this.onTick = null;
+  }
+
+  start() {
+    if (this.timer) return;
+    this.timer = setInterval(() => void this.tick(), this.pollMs);
+    void this.tick();
+  }
+
+  stop() {
+    if (this.timer) clearInterval(this.timer);
+    this.timer = null;
+  }
+
+  snapshot(serverId) {
+    return this.states.get(String(serverId)) || null;
+  }
+
+  health(serverId) {
+    return this.live.get(String(serverId)) || { online: false };
+  }
+
+  async tick() {
+    if (this.busy) return;
+    this.busy = true;
+    try {
+      await Promise.allSettled(this.servers.map((server) => this.pollServer(server)));
+      await this.flushSteam();
+      this.onTick?.();
+    } finally {
+      this.busy = false;
+    }
+  }
+
+  async pollServer(server) {
+    try {
+      const { status, players } = await fetchSnapshot(server);
+      const state = this.states.get(server.id);
+      const { events } = applyTick(state, {
+        status,
+        players,
+        now: Date.now(),
+        pollMs: this.pollMs,
+      });
+      this.persist(server, state, events);
+      this.live.set(server.id, { online: true, name: status.serverName || server.name });
+    } catch (error) {
+      this.live.set(server.id, {
+        online: false,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+
+  persist(server, state, events) {
+    const now = Date.now();
+    for (const player of state.roster) {
+      this.store.touchPlayer(server.id, player, now);
+      this.steamQueue.add(player.steamId);
+    }
+
+    for (const event of events) {
+      if (event.type === "join") {
+        this.store.openSession(server.id, event.player.steamId, event.at);
+      }
+      if (event.type === "tick_time") {
+        this.store.addSeconds(event.steamId, Math.round(event.ms / 1000));
+      }
+      if (event.type === "leave") {
+        this.store.closeSession(server.id, event.steamId, event.at);
+      }
+      if (event.type === "match_end") {
+        for (const snapshot of event.snapshots) {
+          this.store.recordMatch(server.id, snapshot, {
+            map: event.map,
+            mode: event.mode,
+            startedAt: event.startedAt || state.match.startedAt,
+            endedAt: now,
+            winners: event.winners,
+          });
+        }
+      }
+    }
+  }
+
+  async flushSteam() {
+    if (!this.steamApiKey) return;
+    const now = Date.now();
+    const stale = this.store.staleSteamIds(now);
+    const queued = [...this.steamQueue].slice(0, 20);
+    this.steamQueue.clear();
+    const ids = [...new Set([...stale, ...queued])].slice(0, 30);
+    if (!ids.length) return;
+    try {
+      await enrichPlayers(this.store, {
+        apiKey: this.steamApiKey,
+        appId: this.appId,
+        steamIds: ids,
+        now,
+      });
+    } catch (error) {
+      console.warn("steam enrich:", error instanceof Error ? error.message : error);
+    }
+  }
+}

@@ -1,0 +1,11 @@
+node_modules
+.env
+.env.*
+data/*.db
+data/*.db-journal
+data/*.db-wal
+data/*.db-shm
+data/preview-*.png
+*.tgz
+*.zip
+
