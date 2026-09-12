@@ -176,6 +176,12 @@ function roundRect(ctx, x, y, w, h, r) {
   ctx.closePath();
 }
 
+function fillPanel(ctx, x, y, w, h, r = 16) {
+  ctx.fillStyle = "rgba(10, 8, 6, 0.58)";
+  roundRect(ctx, x, y, w, h, r);
+  ctx.fill();
+}
+
 function text(ctx, value, x, y, { size = 28, color = WHITE, align = "left", weight = "600" } = {}) {
   ctx.save();
   ctx.shadowColor = "rgba(0, 0, 0, 0.7)";
@@ -474,14 +480,25 @@ export async function renderStatsCard(view) {
     ["map", "Карта", view.map],
     ["match", "Этот матч", view.live ? `${view.live.kills}/${view.live.deaths}` : "не в игре"],
   ];
+  const tileW = 198;
+  const tileH = 82;
+  const tileGap = 12;
   tiles.forEach((tile, index) => {
     const col = index % 4;
     const row = Math.floor(index / 4);
-    const x = 48 + col * 210;
-    const y = 258 + row * 90;
-    drawIcon(ctx, tile[0], x, y - 16, 22);
-    text(ctx, tile[1], x + 32, y, { size: 16, color: MUTED, weight: "500" });
-    text(ctx, tile[2], x + 32, y + 36, { size: 28, weight: "700" });
+    const x = 48 + col * (tileW + tileGap);
+    const y = 244 + row * (tileH + tileGap);
+    fillPanel(ctx, x, y, tileW, tileH);
+    drawIcon(ctx, tile[0], x + 16, y + 14, 18);
+    text(ctx, tile[1], x + 42, y + 30, { size: 15, color: MUTED, weight: "500" });
+    const value = String(tile[2] ?? "—");
+    let valueSize = 26;
+    ctx.font = `${valueSize}px ${fontFace(700)}`;
+    while (valueSize > 16 && ctx.measureText(value).width > tileW - 32) {
+      valueSize -= 1;
+      ctx.font = `${valueSize}px ${fontFace(700)}`;
+    }
+    text(ctx, value, x + 16, y + 64, { size: valueSize, weight: "700" });
   });
 
   drawIcon(ctx, "rank", 48, 430, 24);
@@ -495,9 +512,7 @@ export async function renderStatsCard(view) {
     { x: 628, icon: "kills", title: "Всего убийств", value: String(view.kills), sub: `смерти ${view.deaths}` },
   ];
   for (const box of boxes) {
-    ctx.fillStyle = "rgba(10, 8, 6, 0.58)";
-    roundRect(ctx, box.x, 478, 270, 200, 16);
-    ctx.fill();
+    fillPanel(ctx, box.x, 478, 270, 200);
     drawIcon(ctx, box.icon, box.x + 22, 500, 20);
     text(ctx, box.title, box.x + 50, 518, { size: 18, color: MUTED });
     text(ctx, box.value, box.x + 24, 598, { size: 56, weight: "800" });
