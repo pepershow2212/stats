@@ -7,7 +7,7 @@ import { startMockRcon } from "./mock-rcon.js";
 import { Poller } from "./poller.js";
 
 async function main() {
-  console.log("сборка царь-слот — пост @everyone, SteamID в RCON");
+  console.log("сборка царь-слот-2 — пост сразу с @everyone, слот после");
   const servers = trackedServers();
   if (!servers.length) {
     if (!envFileExists()) {

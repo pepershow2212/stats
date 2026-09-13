@@ -177,14 +177,11 @@ export async function crownKing(client, store, servers, { force = false } = {}) 
     return null;
   }) : null;
 
-  if (prev && prev.steam_id !== winner.steam_id) {
-    await reserveOnEach(servers, prev.steam_id, false);
-    if (prev.discord_id) await setRole(guild, prev.discord_id, role, false);
+  if (prev && prev.steam_id !== winner.steam_id && prev.discord_id) {
+    await setRole(guild, prev.discord_id, role, false);
   }
-  await dropOldKings(store, servers, winner.steam_id);
 
   const link = store.linkForSteam(winner.steam_id);
-  const reservedOk = allServersOk(await reserveOnEach(servers, winner.steam_id, true));
   const roleOk = link?.discord_id ? await setRole(guild, link.discord_id, role, true) : false;
   const row = {
     weekKey,
@@ -194,12 +191,19 @@ export async function crownKing(client, store, servers, { force = false } = {}) 
     deaths: winner.deaths,
     discordId: link?.discord_id || "",
     crownedAt: Date.now(),
-    reservedOk,
+    reservedOk: false,
     roleOk,
   };
   store.saveKing(row);
   console.log(`царь горы: ${winner.name} ${winner.steam_id} · неделя ${weekKey}`);
   await announceKing(client, store, { ...row, mention: link?.discord_id }, prev);
+
+  await dropOldKings(store, servers, winner.steam_id);
+  const reservedOk = allServersOk(await reserveOnEach(servers, winner.steam_id, true));
+  if (reservedOk) {
+    store.saveKing({ ...row, reservedOk: true, roleOk });
+    row.reservedOk = true;
+  }
   return row;
 }
 

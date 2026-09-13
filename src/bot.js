@@ -152,6 +152,7 @@ function dataDir() {
 export async function startBot({ token, clientId, guildId, store, poller, servers }) {
   const client = new Client({
     intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages],
+    allowedMentions: { parse: ["everyone", "users"] },
   });
   const allowed = { id: guildId || "" };
 
