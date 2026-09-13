@@ -241,6 +241,7 @@ export class StatsStore {
     `);
     this._getKing = db.prepare(`SELECT * FROM hill_kings WHERE week_key = ?`);
     this._latestKing = db.prepare(`SELECT * FROM hill_kings ORDER BY crowned_at DESC LIMIT 1`);
+    this._allKings = db.prepare(`SELECT * FROM hill_kings ORDER BY crowned_at DESC`);
     this._findName = db.prepare(`
       SELECT * FROM players
       WHERE name = ? COLLATE NOCASE
@@ -428,6 +429,10 @@ export class StatsStore {
 
   latestKing() {
     return this._latestKing.get() || null;
+  }
+
+  allKings() {
+    return this._allKings.all();
   }
 
   extras(steamId) {

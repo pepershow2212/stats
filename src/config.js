@@ -45,8 +45,8 @@ export const config = {
   pollerOnly: argv.has("--poller-only"),
   servers: [1, 2, 3, 4].map(makeServer),
   kingRoleName: env("KING_ROLE_NAME", "Царь горы"),
-  kingRoleId: env("KING_ROLE_ID"),
-  kingChannelId: env("KING_CHANNEL_ID"),
+  kingRoleId: env("KING_ROLE_ID", "1548662486759374848"),
+  kingChannelId: env("KING_CHANNEL_ID", "1537776479654518886"),
 };
 
 export function trackedServers() {

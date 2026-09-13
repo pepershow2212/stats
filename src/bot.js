@@ -11,7 +11,7 @@ import {
 } from "discord.js";
 import { dirname } from "node:path";
 import { config } from "./config.js";
-import { crownKing, startKingLoop } from "./king.js";
+import { announceCurrentKing, announceKingRules, crownKing, grantKingRoleOnLink, startKingLoop } from "./king.js";
 import { renderStatsCard } from "./card.js";
 import { fetchCommunityProfile } from "./steam.js";
 import { Cooldown } from "./cooldown.js";
@@ -138,7 +138,9 @@ export function buildCommands(servers) {
     .setDescriptionLocalization("ru", "Царь горы этой недели")
     .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild)
     .addSubcommand((sub) => sub.setName("сейчас").setDescription("Кто царь сейчас"))
-    .addSubcommand((sub) => sub.setName("короновать").setDescription("Выдать роль и резерв топ-1 прямо сейчас"));
+    .addSubcommand((sub) => sub.setName("короновать").setDescription("Выдать роль и слот топ-1 прямо сейчас"))
+    .addSubcommand((sub) => sub.setName("пост").setDescription("Ещё раз отправить красивый пост в канал"))
+    .addSubcommand((sub) => sub.setName("как").setDescription("Пост в канал: как работает царь горы"));
 
   return [stats, top, live, link, unlink, panel, prize, king];
 }
@@ -477,6 +479,22 @@ async function cmdTop(interaction, store, servers, metric) {
 async function cmdKing(interaction, store, servers) {
   await acknowledge(interaction);
   const sub = interaction.options.getSubcommand(false) || "сейчас";
+  if (sub === "как") {
+    const ok = await announceKingRules(interaction.client, store);
+    await interaction.editReply({
+      content: ok ? "Пост «как работает» отправлен в канал оповещений." : "Не смог отправить — проверь канал и права бота.",
+    });
+    return;
+  }
+  if (sub === "пост") {
+    const king = await announceCurrentKing(interaction.client, store);
+    if (!king) {
+      await interaction.editReply({ content: "Царя ещё нет — сначала `/царь короновать`." });
+      return;
+    }
+    await interaction.editReply({ content: `Пост отправлен в канал оповещений: **${king.name}**.` });
+    return;
+  }
   if (sub === "короновать") {
     const king = await crownKing(interaction.client, store, servers, { force: true });
     if (!king) {
@@ -484,7 +502,7 @@ async function cmdKing(interaction, store, servers) {
       return;
     }
     await interaction.editReply({
-      content: `Царь горы: **${king.name}** · ${king.kills} килов${king.discordId ? ` · <@${king.discordId}>` : " · без Discord, пусть сделает `/link`"}`,
+      content: `Царь горы: **${king.name}** · \`${king.steamId}\` · ${king.kills} килов · свободный слот на #1 и #2${king.reservedOk ? "" : " (RCON не записал ID, смотри лог)"}${king.discordId ? ` · <@${king.discordId}>` : " · без Discord, пусть сделает `/link`"}`,
     });
     return;
   }
@@ -527,7 +545,13 @@ async function cmdLink(interaction, store) {
     return;
   }
   store.link(interaction.user.id, steamId, Date.now());
-  await interaction.reply({ content: `Привязал ${interaction.user} → \`${steamId}\`.`, flags: MessageFlags.Ephemeral });
+  const kingRole = await grantKingRoleOnLink(interaction.client, store, interaction.user.id, steamId);
+  await interaction.reply({
+    content: kingRole
+      ? `Привязал ${interaction.user} → \`${steamId}\`. Ты царь горы — роль выдана.`
+      : `Привязал ${interaction.user} → \`${steamId}\`.`,
+    flags: MessageFlags.Ephemeral,
+  });
 }
 
 async function cmdUnlink(interaction, store) {
