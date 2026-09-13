@@ -290,6 +290,18 @@ function panelFingerprint(poller, servers, totals) {
   });
 }
 
+export async function removePanel(channel, store) {
+  if (!channel) return false;
+  const prev = store.panel(channel.id);
+  if (!prev) return false;
+  if (prev.message_id) {
+    await channel.messages.delete(prev.message_id).catch(() => {});
+  }
+  store.dropPanel(channel.id);
+  lastPaint.delete(channel.id);
+  return true;
+}
+
 export async function placePanel(channel, store, poller, servers) {
   if (!channel || bumpLock.has(channel.id)) return;
   bumpLock.add(channel.id);

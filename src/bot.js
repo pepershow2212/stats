@@ -26,6 +26,7 @@ import {
   bumpPanel,
   liveMessage,
   placePanel,
+  removePanel,
   refreshAllPanels,
   statsCardMessage,
   statsModal,
@@ -118,7 +119,13 @@ export function buildCommands(servers) {
   const panel = new SlashCommandBuilder()
     .setName("панель")
     .setDescription("Постоянная панель статистики внизу канала")
-    .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild);
+    .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild)
+    .addBooleanOption((option) =>
+      option
+        .setName("убрать")
+        .setDescription("Remove the panel from this channel")
+        .setDescriptionLocalization("ru", "Снять панель с этого канала"),
+    );
 
   const prize = new SlashCommandBuilder()
     .setName("приз")
@@ -286,6 +293,14 @@ export async function startBot({ token, clientId, guildId, store, poller, server
       else if (interaction.commandName === "link") await cmdLink(interaction, store);
       else if (interaction.commandName === "unlink") await cmdUnlink(interaction, store);
       else if (interaction.commandName === "панель") {
+        if (interaction.options.getBoolean("убрать")) {
+          const gone = await removePanel(interaction.channel, store);
+          await interaction.reply({
+            content: gone ? "Панель снял с этого канала." : "Тут панели не было.",
+            flags: MessageFlags.Ephemeral,
+          });
+          return;
+        }
         await placePanel(interaction.channel, store, poller, servers);
         await interaction.reply({ content: "Панель внизу канала.", flags: MessageFlags.Ephemeral });
       } else if (interaction.commandName === "приз") {
