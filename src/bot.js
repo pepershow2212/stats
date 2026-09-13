@@ -26,6 +26,7 @@ import {
   bumpPanel,
   liveMessage,
   placePanel,
+  removeAllPanels,
   removePanel,
   refreshAllPanels,
   statsCardMessage,
@@ -120,12 +121,9 @@ export function buildCommands(servers) {
     .setName("панель")
     .setDescription("Постоянная панель статистики внизу канала")
     .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild)
-    .addBooleanOption((option) =>
-      option
-        .setName("убрать")
-        .setDescription("Remove the panel from this channel")
-        .setDescriptionLocalization("ru", "Снять панель с этого канала"),
-    );
+    .addSubcommand((sub) => sub.setName("поставить").setDescription("Поставить панель в этот канал"))
+    .addSubcommand((sub) => sub.setName("убрать").setDescription("Снять панель с этого канала"))
+    .addSubcommand((sub) => sub.setName("убрать-все").setDescription("Снять все панели на сервере"));
 
   const prize = new SlashCommandBuilder()
     .setName("приз")
@@ -294,13 +292,23 @@ export async function startBot({ token, clientId, guildId, store, poller, server
       else if (interaction.commandName === "unlink") await cmdUnlink(interaction, store);
       else if (interaction.commandName === "панель") {
         await acknowledge(interaction);
-        if (interaction.options.getBoolean("убрать")) {
+        const sub = interaction.options.getSubcommand(false);
+        const dropOne = sub === "убрать" || interaction.options.getBoolean("убрать");
+        const dropAll = sub === "убрать-все";
+        if (dropAll) {
+          const count = await removeAllPanels(interaction.client, store);
+          await interaction.editReply({ content: `Снял панелей: ${count}.` }).catch(() => {});
+          return;
+        }
+        if (dropOne) {
           const gone = await removePanel(interaction.channel, store);
-          await interaction.editReply({ content: gone ? "Панель снял с этого канала." : "Тут панели не было." });
+          await interaction.editReply({
+            content: gone ? "Панель снял. Больше не вернётся." : "Тут панели не нашёл — уже снята.",
+          }).catch(() => {});
           return;
         }
         await placePanel(interaction.channel, store, poller, servers);
-        await interaction.editReply({ content: "Панель внизу канала." });
+        await interaction.editReply({ content: "Панель внизу канала." }).catch(() => {});
       } else if (interaction.commandName === "приз") {
         await cmdPrize(interaction, store);
       }
@@ -346,7 +354,11 @@ async function denyCooldown(interaction) {
 
 async function acknowledge(interaction) {
   if (interaction.deferred || interaction.replied) return;
-  await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+  try {
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+  } catch (error) {
+    if (error.code !== 10062) throw error;
+  }
 }
 
 async function sendPayload(send, payload, fallbackText) {

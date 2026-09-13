@@ -302,16 +302,53 @@ function panelFingerprint(poller, servers, totals) {
   });
 }
 
+function isPanelMessage(message, botId) {
+  if (!message || message.author?.id !== botId) return false;
+  const names = [...message.attachments.values()].map((file) => file.name || "");
+  if (names.some((name) => /^(panel-\d+\.png|logo\.png)$/i.test(name))) return true;
+  return Boolean(message.components?.length) && !message.content;
+}
+
 export async function removePanel(channel, store) {
   if (!channel) return false;
-  const prev = store.panel(channel.id);
-  if (!prev) return false;
-  if (prev.message_id) {
-    await channel.messages.delete(prev.message_id).catch(() => {});
+  bumpLock.add(channel.id);
+  try {
+    const prev = store.panel(channel.id);
+    store.dropPanel(channel.id);
+    lastPaint.delete(channel.id);
+    const botId = channel.client?.user?.id;
+    if (prev?.message_id) {
+      await channel.messages.delete(prev.message_id).catch(() => {});
+    }
+    const recent = await channel.messages.fetch({ limit: 50 }).catch(() => null);
+    let removed = Boolean(prev);
+    if (recent && botId) {
+      for (const message of recent.values()) {
+        if (!isPanelMessage(message, botId)) continue;
+        await message.delete().catch(() => {});
+        removed = true;
+      }
+    }
+    return removed;
+  } finally {
+    bumpLock.delete(channel.id);
   }
-  store.dropPanel(channel.id);
-  lastPaint.delete(channel.id);
-  return true;
+}
+
+export async function removeAllPanels(client, store) {
+  const rows = store.panels();
+  let count = 0;
+  for (const row of rows) {
+    const channel = await client.channels.fetch(row.channel_id).catch(() => null);
+    if (channel) {
+      if (await removePanel(channel, store)) count += 1;
+    } else {
+      store.dropPanel(row.channel_id);
+      lastPaint.delete(row.channel_id);
+      count += 1;
+    }
+  }
+  return count;
 }
 
 export async function placePanel(channel, store, poller, servers) {
@@ -344,18 +381,18 @@ export async function refreshPanel(channel, store, poller, servers) {
   try {
     const message = await channel.messages.fetch(prev.message_id).catch(() => null);
     if (!message) {
-      repost = true;
+      if (store.panel(channel.id)) repost = true;
     } else {
       await message.edit(await panelMessage(poller, servers, totals));
       lastPaint.set(channel.id, finger);
     }
   } catch (error) {
     console.warn("panel refresh:", error.message);
-    if (/Unknown Message|Invalid Form Body/i.test(error.message || "")) repost = true;
+    if (store.panel(channel.id) && /Unknown Message|Invalid Form Body/i.test(error.message || "")) repost = true;
   } finally {
     bumpLock.delete(channel.id);
   }
-  if (repost) await placePanel(channel, store, poller, servers).catch(() => {});
+  if (repost && store.panel(channel.id)) await placePanel(channel, store, poller, servers).catch(() => {});
 }
 
 export async function refreshAllPanels(client, store, poller, servers) {
