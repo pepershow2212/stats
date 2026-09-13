@@ -481,7 +481,7 @@ async function cmdKing(interaction, store, servers) {
   await acknowledge(interaction);
   const sub = interaction.options.getSubcommand(false) || "сейчас";
   if (sub === "как") {
-    const ok = await announceKingRules(interaction.client, store);
+    const ok = await announceKingRules(interaction.client);
     await interaction.editReply({
       content: ok ? "Пост «как работает» отправлен в канал оповещений." : "Не смог отправить — проверь канал и права бота.",
     });
@@ -513,7 +513,7 @@ async function cmdKing(interaction, store, servers) {
     return;
   }
   await interaction.editReply({
-    content: `Сейчас царь: **${king.name}** · неделя ${king.week_key} · **${king.kills}** килов${king.discord_id ? ` · <@${king.discord_id}>` : ""}`,
+    content: `Сейчас царь: **${king.name}** · \`${king.steam_id}\` · неделя ${king.week_key} · **${king.kills}** килов${king.discord_id ? ` · <@${king.discord_id}>` : ""}`,
   });
 }
 

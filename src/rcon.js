@@ -50,7 +50,8 @@ async function request(server, path, scheme, timeoutMs, options = {}) {
 
 export async function rconCall(server, path, options = {}) {
   const key = cacheKey(server);
-  const preferred = schemeCache.get(key) || (server.tls ? "https" : "http");
+  const remote = server.host && server.host !== "127.0.0.1" && server.host !== "localhost";
+  const preferred = schemeCache.get(key) || (server.tls || remote ? "https" : "http");
   const order = preferred === "https" ? ["https", "http"] : ["http", "https"];
   let lastError;
   for (const scheme of order) {
@@ -107,18 +108,19 @@ export async function listReservedSlots(server) {
 
 export async function addReservedSlot(server, steamId) {
   const want = String(steamId);
-  try {
-    await rconCall(server, "/v1/reserved-slots", {
-      method: "POST",
-      body: { steamId: want },
-      timeoutMs: 5000,
-    });
-    return {};
-  } catch (error) {
-    if (/RCON 409|already|exists|duplicate/i.test(String(error.message))) return {};
-    console.warn("reserve POST", server.name, error instanceof Error ? error.message : error);
+  const bodies = [{ steamId: want }, { steamID: want }, { steam_id: want }];
+  for (const body of bodies) {
+    try {
+      await rconCall(server, "/v1/reserved-slots", { method: "POST", body, timeoutMs: 5000 });
+      console.log(`reserve POST ok ${server.name} ${want}`);
+      return {};
+    } catch (error) {
+      if (/RCON 409|already|exists|duplicate/i.test(String(error.message))) return {};
+      console.warn("reserve POST", server.name, error instanceof Error ? error.message : error);
+    }
   }
   await writeReservedViaConfig(server, [want]);
+  console.log(`reserve config ${server.name} ${want}`);
   return {};
 }
 

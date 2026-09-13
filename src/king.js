@@ -308,32 +308,28 @@ function kingRulesPayload() {
   };
 }
 
-async function postToKingChannel(client, store, payload) {
-  const ids = config.kingChannelId
-    ? [config.kingChannelId]
-    : store.panels().map((row) => row.channel_id).filter(Boolean);
-  if (!ids.length) {
+async function postToKingChannel(client, payload) {
+  const id = config.kingChannelId;
+  if (!id) {
     console.warn("царь горы: некуда постить — задай KING_CHANNEL_ID");
     return false;
   }
-
-  let posted = false;
-  for (const id of ids) {
-    const channel = await client.channels.fetch(id).catch(() => null);
-    if (!channel?.isTextBased?.()) continue;
-    try {
-      await channel.send(payload);
-      posted = true;
-    } catch (error) {
-      console.warn("царь горы пост:", error instanceof Error ? error.message : error);
-    }
+  const channel = await client.channels.fetch(id).catch(() => null);
+  if (!channel?.isTextBased?.()) {
+    console.warn("царь горы: канал оповещений не найден");
+    return false;
   }
-  if (!posted) console.warn("царь горы: канал не принял пост — проверь права бота и KING_CHANNEL_ID");
-  return posted;
+  try {
+    await channel.send(payload);
+    return true;
+  } catch (error) {
+    console.warn("царь горы пост:", error instanceof Error ? error.message : error);
+    return false;
+  }
 }
 
-async function announceKing(client, store, king, prev) {
-  return postToKingChannel(client, store, kingAnnouncePayload(king, prev));
+async function announceKing(client, _store, king, prev) {
+  return postToKingChannel(client, kingAnnouncePayload(king, prev));
 }
 
 export async function announceCurrentKing(client, store) {
@@ -345,8 +341,8 @@ export async function announceCurrentKing(client, store) {
   return king;
 }
 
-export async function announceKingRules(client, store) {
-  return postToKingChannel(client, store, kingRulesPayload());
+export async function announceKingRules(client) {
+  return postToKingChannel(client, kingRulesPayload());
 }
 
 export function startKingLoop(client, store, servers) {
