@@ -50,8 +50,7 @@ async function request(server, path, scheme, timeoutMs, options = {}) {
 
 export async function rconCall(server, path, options = {}) {
   const key = cacheKey(server);
-  const remote = server.host && server.host !== "127.0.0.1" && server.host !== "localhost";
-  const preferred = schemeCache.get(key) || (server.tls || remote ? "https" : "http");
+  const preferred = schemeCache.get(key) || (server.tls ? "https" : "http");
   const order = preferred === "https" ? ["https", "http"] : ["http", "https"];
   let lastError;
   for (const scheme of order) {
@@ -71,28 +70,30 @@ export async function rconGet(server, path, timeoutMs = 8000) {
 }
 
 function reservedIdsFromConfig(text) {
-  return [...String(text || "").matchAll(/^\s*\+DefaultReservedPlayerIds=(\d+)/gm)].map((row) => row[1]);
+  return [...String(text || "").matchAll(/^\s*[+.]DefaultReservedPlayerIds=(\d+)/gm)].map((row) => row[1]);
 }
 
 function applyReservedIds(text, keepIds) {
   const keep = [...new Set((keepIds || []).map(String).filter(Boolean))];
   const lines = String(text || "").split(/\r?\n/);
-  const without = lines.filter((line) => !/^\s*\+DefaultReservedPlayerIds=/.test(line));
-  const extra = keep.map((id) => `+DefaultReservedPlayerIds=${id}`);
-  const at = without.findIndex((line) => /^\s*MaxReservedSlots=/.test(line));
-  if (at >= 0) without.splice(at + 1, 0, ...extra);
-  else without.push(...extra);
+  const without = lines.filter((line) => !/^\s*[+!.]?DefaultReservedPlayerIds=/.test(line));
+  const extra = ["!DefaultReservedPlayerIds=ClearArray", ...keep.map((id) => `.DefaultReservedPlayerIds=${id}`)];
+  const max = without.findIndex((line) => /^\s*MaxReservedSlots=/.test(line));
+  const session = without.findIndex((line) => /\[\/Script\/WDGame\.WDGameSession\]/.test(line));
+  if (max >= 0) without.splice(max, 0, ...extra);
+  else if (session >= 0) without.splice(session + 1, 0, ...extra);
+  else without.push("[/Script/WDGame.WDGameSession]", ...extra);
   return without.join("\n");
 }
 
 async function writeReservedViaConfig(server, keepIds) {
-  const doc = await rconGet(server, "/v1/config", 6000);
+  const doc = await rconGet(server, "/v1/config", 8000);
   const next = applyReservedIds(doc?.text || "", keepIds);
   const revision = doc?.revision ? `"${doc.revision}"` : undefined;
   await rconCall(server, "/v1/config", {
     method: "PUT",
     raw: next,
-    timeoutMs: 6000,
+    timeoutMs: 10000,
     headers: {
       "content-type": "text/plain",
       ...(revision ? { "If-Match": revision } : {}),
@@ -101,38 +102,30 @@ async function writeReservedViaConfig(server, keepIds) {
 }
 
 export async function listReservedSlots(server) {
-  const body = await rconGet(server, "/v1/reserved-slots", 5000);
-  const ids = body?.reservedSlots || body?.steamIds || [];
-  return (Array.isArray(ids) ? ids : []).map(String);
+  try {
+    const body = await rconGet(server, "/v1/reserved-slots", 5000);
+    const ids = body?.reservedSlots || body?.steamIds || [];
+    if (Array.isArray(ids)) return ids.map(String);
+  } catch {
+    // fallback below
+  }
+  const doc = await rconGet(server, "/v1/config", 8000);
+  return reservedIdsFromConfig(doc?.text || "");
 }
 
 export async function addReservedSlot(server, steamId) {
   const want = String(steamId);
-  const bodies = [{ steamId: want }, { steamID: want }, { steam_id: want }];
-  for (const body of bodies) {
-    try {
-      await rconCall(server, "/v1/reserved-slots", { method: "POST", body, timeoutMs: 5000 });
-      console.log(`reserve POST ok ${server.name} ${want}`);
-      return {};
-    } catch (error) {
-      if (/RCON 409|already|exists|duplicate/i.test(String(error.message))) return {};
-      console.warn("reserve POST", server.name, error instanceof Error ? error.message : error);
-    }
-  }
+  const already = await listReservedSlots(server).catch(() => []);
+  if (already.includes(want)) return {};
   await writeReservedViaConfig(server, [want]);
-  console.log(`reserve config ${server.name} ${want}`);
+  const after = await listReservedSlots(server).catch(() => []);
+  if (!after.includes(want)) throw new Error(`слот не записался на ${server.name}`);
+  console.log(`reserve ok ${server.name} ${want}`);
   return {};
 }
 
 export async function dropReservedSlot(server, steamId) {
   const want = String(steamId);
-  try {
-    await rconCall(server, `/v1/reserved-slots/${want}`, { method: "DELETE", timeoutMs: 5000 });
-    return {};
-  } catch (error) {
-    if (/RCON 404/i.test(String(error.message))) return {};
-    console.warn("reserve DELETE", server.name, error instanceof Error ? error.message : error);
-  }
   const ids = await listReservedSlots(server).catch(() => []);
   if (!ids.includes(want)) return {};
   await writeReservedViaConfig(server, ids.filter((id) => id !== want));
