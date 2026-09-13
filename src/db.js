@@ -83,6 +83,18 @@ CREATE TABLE IF NOT EXISTS prize_board_rows (
   FOREIGN KEY (board_id) REFERENCES prize_boards(id) ON DELETE CASCADE
 );
 
+CREATE TABLE IF NOT EXISTS hill_kings (
+  week_key TEXT PRIMARY KEY,
+  steam_id TEXT NOT NULL,
+  name TEXT NOT NULL DEFAULT '',
+  kills INTEGER NOT NULL DEFAULT 0,
+  deaths INTEGER NOT NULL DEFAULT 0,
+  discord_id TEXT NOT NULL DEFAULT '',
+  crowned_at INTEGER NOT NULL,
+  reserved_ok INTEGER NOT NULL DEFAULT 0,
+  role_ok INTEGER NOT NULL DEFAULT 0
+);
+
 CREATE TABLE IF NOT EXISTS server_stats (
   steam_id TEXT NOT NULL,
   server_id TEXT NOT NULL,
@@ -214,6 +226,21 @@ export class StatsStore {
     this._getBySteam = db.prepare(`SELECT * FROM players WHERE steam_id = ?`);
     this._getLinkByDiscord = db.prepare(`SELECT * FROM discord_links WHERE discord_id = ?`);
     this._getLinkBySteam = db.prepare(`SELECT * FROM discord_links WHERE steam_id = ?`);
+    this._setKing = db.prepare(`
+      INSERT INTO hill_kings (week_key, steam_id, name, kills, deaths, discord_id, crowned_at, reserved_ok, role_ok)
+      VALUES (@weekKey, @steamId, @name, @kills, @deaths, @discordId, @crownedAt, @reservedOk, @roleOk)
+      ON CONFLICT(week_key) DO UPDATE SET
+        steam_id = excluded.steam_id,
+        name = excluded.name,
+        kills = excluded.kills,
+        deaths = excluded.deaths,
+        discord_id = excluded.discord_id,
+        crowned_at = excluded.crowned_at,
+        reserved_ok = excluded.reserved_ok,
+        role_ok = excluded.role_ok
+    `);
+    this._getKing = db.prepare(`SELECT * FROM hill_kings WHERE week_key = ?`);
+    this._latestKing = db.prepare(`SELECT * FROM hill_kings ORDER BY crowned_at DESC LIMIT 1`);
     this._findName = db.prepare(`
       SELECT * FROM players
       WHERE name = ? COLLATE NOCASE
@@ -375,6 +402,32 @@ export class StatsStore {
 
   linkForDiscord(discordId) {
     return this._getLinkByDiscord.get(discordId) || null;
+  }
+
+  linkForSteam(steamId) {
+    return this._getLinkBySteam.get(steamId) || null;
+  }
+
+  saveKing(row) {
+    this._setKing.run({
+      weekKey: row.weekKey,
+      steamId: row.steamId,
+      name: row.name || "",
+      kills: row.kills || 0,
+      deaths: row.deaths || 0,
+      discordId: row.discordId || "",
+      crownedAt: row.crownedAt,
+      reservedOk: row.reservedOk ? 1 : 0,
+      roleOk: row.roleOk ? 1 : 0,
+    });
+  }
+
+  king(weekKey) {
+    return this._getKing.get(weekKey) || null;
+  }
+
+  latestKing() {
+    return this._latestKing.get() || null;
   }
 
   extras(steamId) {

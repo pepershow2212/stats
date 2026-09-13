@@ -11,6 +11,7 @@ import {
 } from "discord.js";
 import { dirname } from "node:path";
 import { config } from "./config.js";
+import { crownKing, startKingLoop } from "./king.js";
 import { renderStatsCard } from "./card.js";
 import { fetchCommunityProfile } from "./steam.js";
 import { Cooldown } from "./cooldown.js";
@@ -131,7 +132,15 @@ export function buildCommands(servers) {
     .setDescriptionLocalization("ru", "Зафиксировать топ-100 на выдачу призов")
     .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild);
 
-  return [stats, top, live, link, unlink, panel, prize];
+  const king = new SlashCommandBuilder()
+    .setName("царь")
+    .setDescription("King of the hill this week")
+    .setDescriptionLocalization("ru", "Царь горы этой недели")
+    .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild)
+    .addSubcommand((sub) => sub.setName("сейчас").setDescription("Кто царь сейчас"))
+    .addSubcommand((sub) => sub.setName("короновать").setDescription("Выдать роль и резерв топ-1 прямо сейчас"));
+
+  return [stats, top, live, link, unlink, panel, prize, king];
 }
 
 function dataDir() {
@@ -199,6 +208,7 @@ export async function startBot({ token, clientId, guildId, store, poller, server
     }
     lastPanelAt = 0;
     pushPanels();
+    startKingLoop(ready, store, servers);
   });
 
   client.on(Events.GuildDelete, (guild) => {
@@ -311,6 +321,8 @@ export async function startBot({ token, clientId, guildId, store, poller, server
         await interaction.editReply({ content: "Панель внизу канала." }).catch(() => {});
       } else if (interaction.commandName === "приз") {
         await cmdPrize(interaction, store);
+      } else if (interaction.commandName === "царь") {
+        await cmdKing(interaction, store, servers);
       }
     } catch (error) {
       console.error("command", interaction.commandName || interaction.customId, error);
@@ -460,6 +472,30 @@ async function cmdTop(interaction, store, servers, metric) {
     return false;
   }
   return replyPrivate(interaction, payload, `Топ-100 (${scopeName}) в личке.`);
+}
+
+async function cmdKing(interaction, store, servers) {
+  await acknowledge(interaction);
+  const sub = interaction.options.getSubcommand(false) || "сейчас";
+  if (sub === "короновать") {
+    const king = await crownKing(interaction.client, store, servers, { force: true });
+    if (!king) {
+      await interaction.editReply({ content: "Некого короновать — в топе пусто." });
+      return;
+    }
+    await interaction.editReply({
+      content: `Царь горы: **${king.name}** · ${king.kills} килов${king.discordId ? ` · <@${king.discordId}>` : " · без Discord, пусть сделает `/link`"}`,
+    });
+    return;
+  }
+  const king = store.latestKing();
+  if (!king) {
+    await interaction.editReply({ content: "Царя ещё не было. В пятницу 18:00 МСК выберется топ-1, или `/царь короновать`." });
+    return;
+  }
+  await interaction.editReply({
+    content: `Сейчас царь: **${king.name}** · неделя ${king.week_key} · **${king.kills}** килов${king.discord_id ? ` · <@${king.discord_id}>` : ""}`,
+  });
 }
 
 async function cmdPrize(interaction, store) {

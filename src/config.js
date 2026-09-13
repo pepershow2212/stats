@@ -44,6 +44,9 @@ export const config = {
   mockRcon: flag("MOCK_RCON") || argv.has("--mock"),
   pollerOnly: argv.has("--poller-only"),
   servers: [1, 2, 3, 4].map(makeServer),
+  kingRoleName: env("KING_ROLE_NAME", "Царь горы"),
+  kingRoleId: env("KING_ROLE_ID"),
+  kingChannelId: env("KING_CHANNEL_ID"),
 };
 
 export function trackedServers() {

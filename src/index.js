@@ -7,7 +7,7 @@ import { startMockRcon } from "./mock-rcon.js";
 import { Poller } from "./poller.js";
 
 async function main() {
-  console.log("сборка 3d86e7e — /панель убрать, defer до картинки");
+  console.log("сборка 4eda4d0+царь горы — /панель убрать, /царь");
   const servers = trackedServers();
   if (!servers.length) {
     if (!envFileExists()) {
