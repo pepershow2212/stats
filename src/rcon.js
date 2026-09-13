@@ -75,7 +75,12 @@ function reservedIdsFromConfig(text) {
 
 function applyReservedIds(text, keepIds) {
   const keep = [...new Set((keepIds || []).map(String).filter(Boolean))];
-  const lines = String(text || "").split(/\r?\n/);
+  const lines = String(text || "").split(/\r?\n/).map((line) =>
+    line.replace(/^(\s*ScorePeriod=)(\d+)/, (_, prefix, value) => {
+      const n = Number(value);
+      return n >= 18 && n <= 30 ? `${prefix}${n}` : `${prefix}30`;
+    }),
+  );
   const without = lines.filter((line) => !/^\s*[+!.]?DefaultReservedPlayerIds=/.test(line));
   const extra = ["!DefaultReservedPlayerIds=ClearArray", ...keep.map((id) => `.DefaultReservedPlayerIds=${id}`)];
   const max = without.findIndex((line) => /^\s*MaxReservedSlots=/.test(line));
@@ -89,14 +94,12 @@ function applyReservedIds(text, keepIds) {
 async function writeReservedViaConfig(server, keepIds) {
   const doc = await rconGet(server, "/v1/config", 8000);
   const next = applyReservedIds(doc?.text || "", keepIds);
-  const revision = doc?.revision ? `"${doc.revision}"` : undefined;
-  await rconCall(server, "/v1/config", {
+  await rconCall(server, "/v1/config?force=true", {
     method: "PUT",
     raw: next,
-    timeoutMs: 10000,
+    timeoutMs: 15000,
     headers: {
       "content-type": "text/plain",
-      ...(revision ? { "If-Match": revision } : {}),
     },
   });
 }
