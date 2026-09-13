@@ -220,11 +220,23 @@ export function topMessage(store, metric = "kills", { frozen = false, fileDir = 
         .addTextDisplayComponents(txt(title), txt(note))
         .setThumbnailAccessory(logoThumb()),
     );
-  for (let i = 0; i < rows.length; i += 20) {
+  const lines = rows.map((row, index) => formatTopLine(row, index, metric));
+  const chunks = [];
+  let chunk = [];
+  let size = 0;
+  for (const line of lines) {
+    if (chunk.length && size + line.length + 1 > 3500) {
+      chunks.push(chunk.join("\n"));
+      chunk = [];
+      size = 0;
+    }
+    chunk.push(line);
+    size += line.length + 1;
+  }
+  if (chunk.length) chunks.push(chunk.join("\n"));
+  for (const block of chunks.slice(0, 3)) {
     container.addSeparatorComponents(line());
-    container.addTextDisplayComponents(
-      txt(rows.slice(i, i + 20).map((row, offset) => formatTopLine(row, i + offset, metric)).join("\n")),
-    );
+    container.addTextDisplayComponents(txt(block));
   }
   const files = [logoFile()];
   const csvName = frozen ? `prize-top100.csv` : `top100-${metric}.csv`;

@@ -293,16 +293,14 @@ export async function startBot({ token, clientId, guildId, store, poller, server
       else if (interaction.commandName === "link") await cmdLink(interaction, store);
       else if (interaction.commandName === "unlink") await cmdUnlink(interaction, store);
       else if (interaction.commandName === "панель") {
+        await acknowledge(interaction);
         if (interaction.options.getBoolean("убрать")) {
           const gone = await removePanel(interaction.channel, store);
-          await interaction.reply({
-            content: gone ? "Панель снял с этого канала." : "Тут панели не было.",
-            flags: MessageFlags.Ephemeral,
-          });
+          await interaction.editReply({ content: gone ? "Панель снял с этого канала." : "Тут панели не было." });
           return;
         }
         await placePanel(interaction.channel, store, poller, servers);
-        await interaction.reply({ content: "Панель внизу канала.", flags: MessageFlags.Ephemeral });
+        await interaction.editReply({ content: "Панель внизу канала." });
       } else if (interaction.commandName === "приз") {
         await cmdPrize(interaction, store);
       }
@@ -351,23 +349,43 @@ async function acknowledge(interaction) {
   await interaction.deferReply({ flags: MessageFlags.Ephemeral });
 }
 
+async function sendPayload(send, payload, fallbackText) {
+  try {
+    await send(payload);
+    return true;
+  } catch (error) {
+    if (error.code !== 50035) throw error;
+    await send({
+      content: fallbackText || "Список во вложении.",
+      files: payload.files,
+    });
+    return true;
+  }
+}
+
 async function replyPrivate(interaction, payload, ack) {
   await acknowledge(interaction);
   if (!interaction.guildId) {
-    await interaction.followUp(payload);
+    await sendPayload((body) => interaction.followUp(body), payload, ack);
     return true;
   }
   try {
-    await interaction.user.send(payload);
+    await sendPayload((body) => interaction.user.send(body), payload, ack);
     await interaction.editReply({ content: ack || "Отправил в личку." });
     return true;
   } catch {
     await interaction.editReply({ content: "ЛС закрыты — карточка ниже, только ты видишь." });
-    await interaction.followUp({
-      components: payload.components,
-      files: payload.files,
-      flags: MessageFlags.IsComponentsV2 | MessageFlags.Ephemeral,
-    });
+    await sendPayload(
+      (body) =>
+        interaction.followUp({
+          ...body,
+          flags: body.components?.length
+            ? MessageFlags.IsComponentsV2 | MessageFlags.Ephemeral
+            : MessageFlags.Ephemeral,
+        }),
+      payload,
+      ack,
+    );
     return true;
   }
 }
