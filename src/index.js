@@ -7,7 +7,7 @@ import { startMockRcon } from "./mock-rcon.js";
 import { Poller } from "./poller.js";
 
 async function main() {
-  console.log("сборка царь-слот-6 — без спама reserve fetch failed");
+  console.log("сборка без-vip-1 — только царь горы, платный VIP снят");
   const servers = trackedServers();
   if (!servers.length) {
     if (!envFileExists()) {
