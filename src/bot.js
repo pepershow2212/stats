@@ -503,7 +503,7 @@ async function cmdKing(interaction, store, servers) {
       return;
     }
     await interaction.editReply({
-      content: `Царь горы: **${king.name}** · \`${king.steamId}\` · ${king.kills} килов · свободный слот на #1 и #2${king.reservedOk ? "" : " (RCON не записал ID, смотри лог)"}${king.discordId ? ` · <@${king.discordId}>` : " · без Discord, пусть сделает `/link`"}`,
+      content: `Царь горы: **${king.name}** · \`${king.steamId}\` · ${king.kills} килов · VIP-приоритет на #1 и #2${king.reservedOk ? "" : " (RCON не записал ID, смотри лог)"}${king.discordId ? ` · <@${king.discordId}>` : " · без Discord, пусть сделает `/link`"}`,
     });
     return;
   }
