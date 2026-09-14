@@ -1,7 +1,7 @@
 import { Routes } from "discord.js";
 import { config, vipServers } from "./config.js";
 import { isSteamId64 } from "./logic.js";
-import { addReservedSlot, dropReservedSlot } from "./rcon.js";
+import { addReservedSlot, dropReservedSlot, getMaxReservedSlots } from "./rcon.js";
 
 const STEAM_RE = /\b(7656119\d{10})\b/;
 const DISCORD_RE = /(?:<@!?(\d{17,20})>|discord[:\s#]*(\d{17,20})|\bid[:\s]*(\d{17,20})\b)/i;
@@ -26,6 +26,47 @@ export function vipDaysFromAmount(amount, currency = "RUB") {
   return packs * config.vipDays;
 }
 
+let capacityCache = { at: 0, value: null };
+
+export async function getVipCapacity(store, servers = null) {
+  const now = Date.now();
+  if (capacityCache.value && now - capacityCache.at < 60_000) {
+    return {
+      ...capacityCache.value,
+      active: store.activeVipCount(now),
+    };
+  }
+
+  const active = store.activeVipCount(now);
+  let fromRcon = 0;
+  const list = vipServers(servers);
+  for (const server of list) {
+    try {
+      const n = await getMaxReservedSlots(server);
+      if (n > 0) fromRcon = fromRcon > 0 ? Math.min(fromRcon, n) : n;
+    } catch {
+      // keep fallback
+    }
+  }
+
+  // Лимит продажи = что в .env и что реально на сервере (если резерв подняли — панель покажет больше).
+  const max = Math.max(config.vipMaxSlots, fromRcon || 0);
+  const value = {
+    active,
+    max,
+    fromRcon,
+    fromEnv: config.vipMaxSlots,
+    open: Math.max(0, max - active),
+    full: active >= max,
+  };
+  capacityCache = { at: now, value };
+  return value;
+}
+
+export function clearVipCapacityCache() {
+  capacityCache = { at: 0, value: null };
+}
+
 function warn(serverName, error) {
   console.warn("vip reserve", serverName || "?", error instanceof Error ? error.message : error);
 }
@@ -35,8 +76,12 @@ async function reserveOnVipServers(servers, steamId, on) {
   const results = [];
   for (const server of list) {
     try {
-      if (on) await addReservedSlot(server, steamId, { minSlots: config.vipMaxSlots + 5 });
-      else await dropReservedSlot(server, steamId);
+      if (on) {
+        const maxSlots = await getMaxReservedSlots(server).catch(() => 0);
+        await addReservedSlot(server, steamId, {
+          minSlots: Math.max(config.vipMaxSlots, maxSlots || 0) + 5,
+        });
+      } else await dropReservedSlot(server, steamId);
       results.push({ id: server.id, name: server.name, ok: true });
     } catch (error) {
       warn(server.name, error);
@@ -111,8 +156,9 @@ export async function grantVip(client, store, servers, {
 
   const now = Date.now();
   const existing = store.activeVip(id, now);
-  if (!existing && store.activeVipCount(now) >= config.vipMaxSlots) {
-    return { ok: false, error: "full", active: store.activeVipCount(now) };
+  const capacity = await getVipCapacity(store, servers);
+  if (!existing && capacity.full) {
+    return { ok: false, error: "full", active: capacity.active, max: capacity.max };
   }
 
   const link = store.linkForSteam(id);
@@ -143,6 +189,7 @@ export async function grantVip(client, store, servers, {
   const role = guild ? await ensureVipRole(guild).catch(() => null) : null;
   const roleOk = disc ? await setVipRole(guild, disc, role, true) : false;
   store.markVipFlags(id, { reservedOk, roleOk });
+  clearVipCapacityCache();
 
   return {
     ok: true,
@@ -171,6 +218,7 @@ export async function revokeVip(client, store, servers, steamId, { keepIfKing = 
   if (row.discord_id) await setVipRole(guild, row.discord_id, role, false);
 
   store.dropVip(id);
+  clearVipCapacityCache();
   return { ok: true, steamId: id, keptReserveAsKing: Boolean(king) };
 }
 
@@ -181,6 +229,103 @@ export async function syncVipReserves(store, servers) {
     const reservedOk = allOk(await reserveOnVipServers(servers, row.steam_id, true));
     if (reservedOk) store.markVipFlags(row.steam_id, { reservedOk: true, roleOk: Boolean(row.role_ok) });
   }
+}
+
+export async function syncVipRoles(client, store) {
+  if (!client) return;
+  const guild = await getGuild(client);
+  const role = guild ? await ensureVipRole(guild).catch(() => null) : null;
+  if (!guild || !role) return;
+  const now = Date.now();
+  for (const row of store.activeVips(now)) {
+    let discordId = String(row.discord_id || "");
+    if (!discordId) {
+      const link = store.linkForSteam(row.steam_id);
+      discordId = link?.discord_id || "";
+      if (discordId) {
+        store.saveVip({
+          steamId: row.steam_id,
+          discordId,
+          name: row.name,
+          source: row.source,
+          donationId: row.donation_id,
+          amount: row.amount,
+          currency: row.currency,
+          startsAt: row.starts_at,
+          expiresAt: row.expires_at,
+          reservedOk: Boolean(row.reserved_ok),
+          roleOk: false,
+          note: row.note,
+        });
+      }
+    }
+    if (!discordId) continue;
+    if (row.role_ok) continue;
+    const roleOk = await setVipRole(guild, discordId, role, true);
+    if (roleOk) store.markVipFlags(row.steam_id, { reservedOk: Boolean(row.reserved_ok), roleOk: true });
+  }
+}
+
+function ts(ms) {
+  return `<t:${Math.floor(Number(ms) / 1000)}:d>`;
+}
+
+function tsRel(ms) {
+  return `<t:${Math.floor(Number(ms) / 1000)}:R>`;
+}
+
+export function formatVipStatus(store, user) {
+  const link = store.linkForDiscord(user.id);
+  const vip = link?.steam_id ? store.vip(link.steam_id) : store.vipForDiscord(user.id);
+  const now = Date.now();
+
+  if (!vip) {
+    if (!link?.steam_id) {
+      return {
+        content: [
+          `**VIP статус** · ${user}`,
+          "Steam не привязан. Сделай `/link` со своим SteamID64, потом купи VIP.",
+        ].join("\n"),
+      };
+    }
+    return {
+      content: [
+        `**VIP статус** · ${user}`,
+        `Steam: \`${link.steam_id}\``,
+        "Активного VIP нет.",
+        "Жми **Оплатить** на панели или `/vip купить`.",
+      ].join("\n"),
+    };
+  }
+
+  const active = vip.expires_at > now;
+  const paid =
+    Number(vip.amount) > 0
+      ? `**${vip.amount}** ${vip.currency || "RUB"}`
+      : "не указано";
+  const source =
+    vip.source === "donationalerts"
+      ? "DonationAlerts"
+      : vip.source === "boosty"
+        ? "Boosty"
+        : vip.source === "manual"
+          ? "вручную"
+          : vip.source || "—";
+
+  return {
+    content: [
+      `**VIP статус** · ${user}`,
+      `Состояние: ${active ? "**активен**" : "**истёк**"}`,
+      `Steam: \`${vip.steam_id}\``,
+      `Оплачено: ${paid}`,
+      `Выдан: ${ts(vip.starts_at)} (${tsRel(vip.starts_at)})`,
+      `Действует до: ${ts(vip.expires_at)} (${tsRel(vip.expires_at)})`,
+      `Источник: ${source}`,
+      `Очередь (reserved): ${vip.reserved_ok ? "да" : "ещё нет / ошибка RCON"}`,
+      `Роль Discord: ${vip.role_ok ? "выдана" : active ? "ждёт `/link` или синк" : "снята"}`,
+      `Серверы: #${config.vipServerIds.join(" и #")}`,
+    ].join("\n"),
+  };
 }
 
 export async function expireVips(client, store, servers) {
@@ -197,6 +342,7 @@ export async function expireVips(client, store, servers) {
     dropped += 1;
     console.log(`vip expired ${row.steam_id}${king ? " (слот оставлен — царь горы)" : ""}`);
   }
+  if (dropped) clearVipCapacityCache();
   return dropped;
 }
 
@@ -245,6 +391,7 @@ export function startVipLoop(client, store, servers) {
     try {
       await expireVips(client, store, servers);
       await syncVipReserves(store, servers);
+      await syncVipRoles(client, store);
     } catch (error) {
       console.warn("vip loop:", error instanceof Error ? error.message : error);
     }

@@ -76,6 +76,11 @@ function reservedIdsFromConfig(text) {
   return [...String(text || "").matchAll(/^\s*[+.]DefaultReservedPlayerIds=(\d+)/gm)].map((row) => row[1]);
 }
 
+export function maxReservedSlotsFromConfig(text) {
+  const match = String(text || "").match(/^\s*MaxReservedSlots=(\d+)/m);
+  return match ? Number(match[1]) || 0 : 0;
+}
+
 export function applyReservedIds(text, keepIds, { minSlots = 0 } = {}) {
   const keep = [...new Set((keepIds || []).map(String).filter(Boolean))];
   const needSlots = Math.max(Number(minSlots) || 0, keep.length);
@@ -131,6 +136,11 @@ export async function listReservedSlots(server) {
   }
   const doc = await rconGet(server, "/v1/config", 6000);
   return reservedIdsFromConfig(doc?.text || "");
+}
+
+export async function getMaxReservedSlots(server) {
+  const doc = await rconGet(server, "/v1/config", 6000);
+  return maxReservedSlotsFromConfig(doc?.text || "");
 }
 
 export async function addReservedSlot(server, steamId, { minSlots = 0 } = {}) {

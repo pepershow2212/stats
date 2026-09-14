@@ -28,6 +28,14 @@ describe("vip message parse", () => {
   });
 });
 
+describe("max reserved slots parse", () => {
+  it("reads MaxReservedSlots from ini", async () => {
+    const { maxReservedSlotsFromConfig } = await import("../src/rcon.js");
+    assert.equal(maxReservedSlotsFromConfig("MaxReservedSlots=100\n"), 100);
+    assert.equal(maxReservedSlotsFromConfig("foo"), 0);
+  });
+});
+
 describe("vip days from amount", () => {
   it("maps rub packs to days", () => {
     assert.equal(vipDaysFromAmount(100, "RUB"), 0);

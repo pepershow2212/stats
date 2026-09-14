@@ -50,7 +50,7 @@ export const config = {
   vipRoleName: env("VIP_ROLE_NAME", "VIP"),
   vipRoleId: env("VIP_ROLE_ID"),
   vipChannelId: env("VIP_CHANNEL_ID"),
-  vipDonateUrl: env("VIP_DONATE_URL", env("DA_DONATE_URL")),
+  vipDonateUrl: env("VIP_DONATE_URL", "https://boosty.to/wardogsrussia"),
   vipPriceRub: Math.max(1, Number(env("VIP_PRICE_RUB", "299")) || 299),
   vipDays: Math.max(1, Number(env("VIP_DAYS", "30")) || 30),
   vipMaxSlots: Math.max(1, Number(env("VIP_MAX_SLOTS", "50")) || 50),
@@ -58,11 +58,11 @@ export const config = {
     .split(/[,\s]+/)
     .map((id) => id.trim())
     .filter(Boolean),
-  daAccessToken: env("DA_ACCESS_TOKEN"),
-  daRefreshToken: env("DA_REFRESH_TOKEN"),
-  daClientId: env("DA_CLIENT_ID"),
-  daClientSecret: env("DA_CLIENT_SECRET"),
-  daPollMs: Math.max(10_000, Number(env("DA_POLL_MS", "20000")) || 20_000),
+  boostyBlog: env("BOOSTY_BLOG", "wardogsrussia"),
+  boostyAccessToken: env("BOOSTY_ACCESS_TOKEN"),
+  boostyRefreshToken: env("BOOSTY_REFRESH_TOKEN"),
+  boostyDeviceId: env("BOOSTY_DEVICE_ID"),
+  boostyPollMs: Math.max(15_000, Number(env("BOOSTY_POLL_MS", "30000")) || 30_000),
 };
 
 export function trackedServers() {

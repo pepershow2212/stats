@@ -123,6 +123,12 @@ CREATE TABLE IF NOT EXISTS vip_donations (
   processed_at INTEGER
 );
 
+CREATE TABLE IF NOT EXISTS vip_panels (
+  channel_id TEXT PRIMARY KEY,
+  message_id TEXT NOT NULL,
+  guild_id TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS server_stats (
   steam_id TEXT NOT NULL,
   server_id TEXT NOT NULL,
@@ -365,6 +371,14 @@ export class StatsStore {
       ON CONFLICT(channel_id) DO UPDATE SET message_id = excluded.message_id, guild_id = excluded.guild_id
     `);
     this._deletePanel = db.prepare(`DELETE FROM panels WHERE channel_id = ?`);
+    this._getVipPanel = db.prepare(`SELECT * FROM vip_panels WHERE channel_id = ?`);
+    this._allVipPanels = db.prepare(`SELECT * FROM vip_panels`);
+    this._setVipPanel = db.prepare(`
+      INSERT INTO vip_panels (channel_id, message_id, guild_id)
+      VALUES (@channelId, @messageId, @guildId)
+      ON CONFLICT(channel_id) DO UPDATE SET message_id = excluded.message_id, guild_id = excluded.guild_id
+    `);
+    this._deleteVipPanel = db.prepare(`DELETE FROM vip_panels WHERE channel_id = ?`);
     this._insertBoard = db.prepare(`
       INSERT INTO prize_boards (reason, created_at, frozen)
       VALUES (@reason, @createdAt, @frozen)
@@ -765,6 +779,22 @@ export class StatsStore {
 
   dropPanel(channelId) {
     this._deletePanel.run(channelId);
+  }
+
+  vipPanel(channelId) {
+    return this._getVipPanel.get(channelId) || null;
+  }
+
+  vipPanels() {
+    return this._allVipPanels.all();
+  }
+
+  saveVipPanel(channelId, messageId, guildId) {
+    this._setVipPanel.run({ channelId, messageId, guildId });
+  }
+
+  dropVipPanel(channelId) {
+    this._deleteVipPanel.run(channelId);
   }
 
   close() {
