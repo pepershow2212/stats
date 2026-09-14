@@ -58,11 +58,6 @@ export const config = {
     .split(/[,\s]+/)
     .map((id) => id.trim())
     .filter(Boolean),
-  boostyBlog: env("BOOSTY_BLOG", "wardogsrussia"),
-  boostyAccessToken: env("BOOSTY_ACCESS_TOKEN"),
-  boostyRefreshToken: env("BOOSTY_REFRESH_TOKEN"),
-  boostyDeviceId: env("BOOSTY_DEVICE_ID"),
-  boostyPollMs: Math.max(15_000, Number(env("BOOSTY_POLL_MS", "30000")) || 30_000),
 };
 
 export function trackedServers() {

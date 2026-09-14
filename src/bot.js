@@ -12,7 +12,6 @@ import {
 import { dirname } from "node:path";
 import { config } from "./config.js";
 import { announceCurrentKing, announceKingRules, crownKing, grantKingRoleOnLink, startKingLoop } from "./king.js";
-import { startBoostyLoop, pollBoosty } from "./boosty.js";
 import { grantVip, grantVipRoleOnLink, revokeVip, startVipLoop, formatVipStatus, getVipCapacity } from "./vip.js";
 import {
   VIP_PANEL_HOW,
@@ -205,12 +204,6 @@ export function buildCommands(servers) {
           option.setName("steamid").setDescription("SteamID64").setRequired(true),
         ),
     )
-    .addSubcommand((sub) =>
-      sub
-        .setName("донаты")
-        .setDescription("Poll Boosty donations now")
-        .setDescriptionLocalization("ru", "Проверить донаты Boosty сейчас"),
-    )
     .addSubcommandGroup((group) =>
       group
         .setName("панель")
@@ -291,7 +284,6 @@ export async function startBot({ token, clientId, guildId, store, poller, server
     pushPanels();
     startKingLoop(ready, store, servers);
     startVipLoop(ready, store, servers);
-    startBoostyLoop(ready, store, servers);
     for (const row of store.vipPanels()) {
       const channel = await ready.channels.fetch(row.channel_id).catch(() => null);
       if (channel) await placeVipPanel(channel, store, servers).catch(() => {});
@@ -379,19 +371,17 @@ export async function startBot({ token, clientId, guildId, store, poller, server
         const capacity = await getVipCapacity(store, servers);
         await interaction.reply({
           content: [
-            "**Как купить VIP — автовыдача**",
+            "**Как купить VIP**",
             "",
             "**1.** `/link` + SteamID64 (один раз)",
             `**2.** Оплата: ${url}`,
             `    от **${config.vipPriceRub} ₽** = **${config.vipDays} дней**`,
-            "**3.** В сообщении доната на Boosty укажи **SteamID64**",
-            "**4.** Бот сам выдаст VIP и роль Discord (~1 мин)",
+            "**3.** Напиши админам: оплатил VIP + SteamID (или что уже `/link`)",
+            "**4.** Админ выдаёт — VIP и роль включаются сразу",
             "",
             `Слоты: **${capacity.active} / ${capacity.max}** · ${
               capacity.full ? "⛔ купить нельзя" : `✅ свободно ${capacity.open}`
             }`,
-            "",
-            "Не сработало — напиши админам, выдадут `/vip выдать`.",
           ].join("\n"),
           flags: MessageFlags.Ephemeral,
         });
@@ -732,8 +722,8 @@ async function cmdVip(interaction, store, servers) {
         "**Как купить**",
         "1. `/link` + SteamID64",
         `2. Оплата: ${url}`,
-        "3. В сообщении на Boosty укажи **SteamID64**",
-        "4. Бот сам выдаст VIP и роль (~1 мин)",
+        "3. Напиши админам: оплатил VIP + SteamID",
+        "4. Админ выдаёт — VIP и роль сразу",
         "",
         "Статус: кнопка **Мой VIP** на панели.",
       ].join("\n"),
@@ -828,30 +818,5 @@ async function cmdVip(interaction, store, servers) {
         ? `VIP снят у \`${result.steamId}\`, но reserved оставлен — он царь горы.`
         : `VIP снят у \`${result.steamId}\`.`,
     });
-    return;
-  }
-
-  if (sub === "донаты") {
-    if (!canManageVip(interaction)) {
-      await interaction.reply({ content: "Нужно право Manage Server.", flags: MessageFlags.Ephemeral });
-      return;
-    }
-    await acknowledge(interaction);
-    try {
-      const out = await pollBoosty(interaction.client, store, servers);
-      if (!out.ok) {
-        await interaction.editReply({
-          content: "Boosty не настроен — задай BOOSTY_ACCESS_TOKEN + BOOSTY_REFRESH_TOKEN + BOOSTY_DEVICE_ID в .env.",
-        });
-        return;
-      }
-      await interaction.editReply({
-        content: `Boosty: проверил **${out.checked}**, выдано VIP **${out.granted}**, без SteamID **${out.needSteam || 0}**.`,
-      });
-    } catch (error) {
-      await interaction.editReply({
-        content: `Ошибка Boosty: ${error instanceof Error ? error.message : error}`,
-      });
-    }
   }
 }
