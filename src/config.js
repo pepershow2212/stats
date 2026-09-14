@@ -47,6 +47,22 @@ export const config = {
   kingRoleName: env("KING_ROLE_NAME", "Царь горы"),
   kingRoleId: env("KING_ROLE_ID", "1548662486759374848"),
   kingChannelId: env("KING_CHANNEL_ID", "1537776479654518886"),
+  vipRoleName: env("VIP_ROLE_NAME", "VIP"),
+  vipRoleId: env("VIP_ROLE_ID"),
+  vipChannelId: env("VIP_CHANNEL_ID"),
+  vipDonateUrl: env("VIP_DONATE_URL", env("DA_DONATE_URL")),
+  vipPriceRub: Math.max(1, Number(env("VIP_PRICE_RUB", "299")) || 299),
+  vipDays: Math.max(1, Number(env("VIP_DAYS", "30")) || 30),
+  vipMaxSlots: Math.max(1, Number(env("VIP_MAX_SLOTS", "50")) || 50),
+  vipServerIds: env("VIP_SERVER_IDS", "1,2")
+    .split(/[,\s]+/)
+    .map((id) => id.trim())
+    .filter(Boolean),
+  daAccessToken: env("DA_ACCESS_TOKEN"),
+  daRefreshToken: env("DA_REFRESH_TOKEN"),
+  daClientId: env("DA_CLIENT_ID"),
+  daClientSecret: env("DA_CLIENT_SECRET"),
+  daPollMs: Math.max(10_000, Number(env("DA_POLL_MS", "20000")) || 20_000),
 };
 
 export function trackedServers() {
@@ -64,6 +80,12 @@ export function trackedServers() {
     ];
   }
   return config.servers.filter((server) => server.enabled);
+}
+
+export function vipServers(servers = trackedServers()) {
+  const allow = new Set(config.vipServerIds.map(String));
+  const list = (servers || []).filter((server) => allow.has(String(server.id)));
+  return list.length ? list : (servers || []).filter((server) => server.id === "1" || server.id === "2");
 }
 
 export function getServer(id) {

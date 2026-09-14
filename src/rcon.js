@@ -76,8 +76,9 @@ function reservedIdsFromConfig(text) {
   return [...String(text || "").matchAll(/^\s*[+.]DefaultReservedPlayerIds=(\d+)/gm)].map((row) => row[1]);
 }
 
-function applyReservedIds(text, keepIds) {
+export function applyReservedIds(text, keepIds, { minSlots = 0 } = {}) {
   const keep = [...new Set((keepIds || []).map(String).filter(Boolean))];
+  const needSlots = Math.max(Number(minSlots) || 0, keep.length);
   const lines = String(text || "").split(/\r?\n/).map((line) =>
     line.replace(/^(\s*ScorePeriod=)(\d+)/, (_, prefix, value) => {
       const n = Number(value);
@@ -85,18 +86,25 @@ function applyReservedIds(text, keepIds) {
     }),
   );
   const without = lines.filter((line) => !/^\s*[+!.]?DefaultReservedPlayerIds=/.test(line));
+  for (let i = 0; i < without.length; i++) {
+    const match = without[i].match(/^(\s*MaxReservedSlots=)(\d+)/);
+    if (!match) continue;
+    const current = Number(match[2]) || 0;
+    if (needSlots > current) without[i] = `${match[1]}${needSlots}`;
+    break;
+  }
   const extra = ["!DefaultReservedPlayerIds=ClearArray", ...keep.map((id) => `.DefaultReservedPlayerIds=${id}`)];
   const max = without.findIndex((line) => /^\s*MaxReservedSlots=/.test(line));
   const session = without.findIndex((line) => /\[\/Script\/WDGame\.WDGameSession\]/.test(line));
   if (max >= 0) without.splice(max, 0, ...extra);
   else if (session >= 0) without.splice(session + 1, 0, ...extra);
-  else without.push("[/Script/WDGame.WDGameSession]", ...extra);
+  else without.push("[/Script/WDGame.WDGameSession]", `MaxReservedSlots=${Math.max(needSlots, 20)}`, ...extra);
   return without.join("\n");
 }
 
-async function writeReservedViaConfig(server, keepIds) {
+async function writeReservedViaConfig(server, keepIds, { minSlots = 0 } = {}) {
   const doc = await rconGet(server, "/v1/config", 8000);
-  const next = applyReservedIds(doc?.text || "", keepIds);
+  const next = applyReservedIds(doc?.text || "", keepIds, { minSlots });
   await rconCall(server, "/v1/config?force=true", {
     method: "PUT",
     raw: next,
@@ -125,14 +133,18 @@ export async function listReservedSlots(server) {
   return reservedIdsFromConfig(doc?.text || "");
 }
 
-export async function addReservedSlot(server, steamId) {
+export async function addReservedSlot(server, steamId, { minSlots = 0 } = {}) {
   const want = String(steamId);
   const already = await listReservedSlots(server).catch(() => []);
-  if (already.includes(want)) return {};
-  await writeReservedViaConfig(server, [want]);
+  if (already.includes(want)) {
+    if (minSlots > 0) await writeReservedViaConfig(server, already, { minSlots });
+    return {};
+  }
+  const next = [...already, want];
+  await writeReservedViaConfig(server, next, { minSlots });
   const after = await listReservedSlots(server).catch(() => []);
   if (!after.includes(want)) throw new Error(`слот не записался на ${server.name}`);
-  console.log(`reserve ok ${server.name} ${want}`);
+  console.log(`reserve ok ${server.name} ${want} (+${already.length} already)`);
   return {};
 }
 

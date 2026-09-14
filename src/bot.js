@@ -12,6 +12,8 @@ import {
 import { dirname } from "node:path";
 import { config } from "./config.js";
 import { announceCurrentKing, announceKingRules, crownKing, grantKingRoleOnLink, startKingLoop } from "./king.js";
+import { startDonationAlertsLoop, pollDonationAlerts } from "./donationalerts.js";
+import { grantVip, grantVipRoleOnLink, revokeVip, startVipLoop } from "./vip.js";
 import { renderStatsCard } from "./card.js";
 import { fetchCommunityProfile } from "./steam.js";
 import { Cooldown } from "./cooldown.js";
@@ -142,7 +144,66 @@ export function buildCommands(servers) {
     .addSubcommand((sub) => sub.setName("пост").setDescription("Ещё раз отправить красивый пост в канал"))
     .addSubcommand((sub) => sub.setName("как").setDescription("Пост в канал: как работает царь горы"));
 
-  return [stats, top, live, link, unlink, panel, prize, king];
+  const vip = new SlashCommandBuilder()
+    .setName("vip")
+    .setDescription("VIP queue priority")
+    .setDescriptionLocalization("ru", "VIP — приоритет в очереди")
+    .addSubcommand((sub) =>
+      sub
+        .setName("купить")
+        .setDescription("How to buy VIP")
+        .setDescriptionLocalization("ru", "Как купить VIP"),
+    )
+    .addSubcommand((sub) =>
+      sub
+        .setName("статус")
+        .setDescription("VIP status")
+        .setDescriptionLocalization("ru", "Статус VIP")
+        .addUserOption((option) =>
+          option.setName("игрок").setDescription("Участник Discord").setDescriptionLocalization("ru", "Участник Discord"),
+        ),
+    )
+    .addSubcommand((sub) =>
+      sub
+        .setName("список")
+        .setDescription("Active VIP list")
+        .setDescriptionLocalization("ru", "Список активных VIP"),
+    )
+    .addSubcommand((sub) =>
+      sub
+        .setName("выдать")
+        .setDescription("Grant VIP manually")
+        .setDescriptionLocalization("ru", "Выдать VIP вручную")
+        .addStringOption((option) =>
+          option
+            .setName("steamid")
+            .setDescription("SteamID64")
+            .setRequired(true),
+        )
+        .addIntegerOption((option) =>
+          option.setName("дней").setDescription("Срок в днях").setMinValue(1).setMaxValue(3650),
+        )
+        .addUserOption((option) =>
+          option.setName("игрок").setDescription("Discord для роли"),
+        ),
+    )
+    .addSubcommand((sub) =>
+      sub
+        .setName("снять")
+        .setDescription("Revoke VIP")
+        .setDescriptionLocalization("ru", "Снять VIP")
+        .addStringOption((option) =>
+          option.setName("steamid").setDescription("SteamID64").setRequired(true),
+        ),
+    )
+    .addSubcommand((sub) =>
+      sub
+        .setName("донаты")
+        .setDescription("Poll DonationAlerts now")
+        .setDescriptionLocalization("ru", "Проверить донаты DonationAlerts сейчас"),
+    );
+
+  return [stats, top, live, link, unlink, panel, prize, king, vip];
 }
 
 function dataDir() {
@@ -212,6 +273,8 @@ export async function startBot({ token, clientId, guildId, store, poller, server
     lastPanelAt = 0;
     pushPanels();
     startKingLoop(ready, store, servers);
+    startVipLoop(ready, store, servers);
+    startDonationAlertsLoop(ready, store, servers);
   });
 
   client.on(Events.GuildDelete, (guild) => {
@@ -326,6 +389,8 @@ export async function startBot({ token, clientId, guildId, store, poller, server
         await cmdPrize(interaction, store);
       } else if (interaction.commandName === "царь") {
         await cmdKing(interaction, store, servers);
+      } else if (interaction.commandName === "vip") {
+        await cmdVip(interaction, store, servers);
       }
     } catch (error) {
       console.error("command", interaction.commandName || interaction.customId, error);
@@ -547,9 +612,14 @@ async function cmdLink(interaction, store) {
   }
   store.link(interaction.user.id, steamId, Date.now());
   const kingRole = await grantKingRoleOnLink(interaction.client, store, interaction.user.id, steamId);
+  const vipRole = await grantVipRoleOnLink(interaction.client, store, interaction.user.id, steamId);
+  const extras = [
+    kingRole ? "царь горы — роль выдана" : "",
+    vipRole ? "VIP — роль выдана" : "",
+  ].filter(Boolean);
   await interaction.reply({
-    content: kingRole
-      ? `Привязал ${interaction.user} → \`${steamId}\`. Ты царь горы — роль выдана.`
+    content: extras.length
+      ? `Привязал ${interaction.user} → \`${steamId}\`. ${extras.join("; ")}.`
       : `Привязал ${interaction.user} → \`${steamId}\`.`,
     flags: MessageFlags.Ephemeral,
   });
@@ -558,4 +628,152 @@ async function cmdLink(interaction, store) {
 async function cmdUnlink(interaction, store) {
   store.unlinkDiscord(interaction.user.id);
   await interaction.reply({ content: "Steam отвязан.", flags: MessageFlags.Ephemeral });
+}
+
+function canManageVip(interaction) {
+  return interaction.memberPermissions?.has(PermissionFlagsBits.ManageGuild);
+}
+
+function formatVipUntil(expiresAt) {
+  return `<t:${Math.floor(Number(expiresAt) / 1000)}:d>`;
+}
+
+async function cmdVip(interaction, store, servers) {
+  const sub = interaction.options.getSubcommand(false) || "купить";
+
+  if (sub === "купить") {
+    const url = config.vipDonateUrl || "ссылка DonationAlerts ещё не задана (VIP_DONATE_URL)";
+    await interaction.reply({
+      content: [
+        `**VIP** — приоритет в очереди на серверах **#${config.vipServerIds.join(" и #")}**.`,
+        `Цена: **${config.vipPriceRub} ₽** = **${config.vipDays} дней**. Больше сумма — больше месяцев подряд.`,
+        `Лимит: **${config.vipMaxSlots}** слотов · сейчас занято **${store.activeVipCount()}**.`,
+        "",
+        "1. Сделай `/link` со своим SteamID64",
+        `2. Задонать здесь: ${url}`,
+        "3. **В сообщении к донату обязательно укажи SteamID64** (например `7656119…`)",
+        "4. Бот сам выдаст VIP в течение ~1 минуты",
+        "",
+        "Царь горы и платный VIP не мешают друг другу.",
+      ].join("\n"),
+      flags: MessageFlags.Ephemeral,
+    });
+    return;
+  }
+
+  if (sub === "статус") {
+    const user = interaction.options.getUser("игрок") || interaction.user;
+    const link = store.linkForDiscord(user.id);
+    const vip = link?.steam_id ? store.activeVip(link.steam_id) : store.vipForDiscord(user.id);
+    if (!vip || vip.expires_at <= Date.now()) {
+      await interaction.reply({
+        content: link?.steam_id
+          ? `У ${user} нет активного VIP (\`${link.steam_id}\`).`
+          : `${user} не привязал Steam (\`/link\`) и VIP не найден.`,
+        flags: MessageFlags.Ephemeral,
+      });
+      return;
+    }
+    await interaction.reply({
+      content: `VIP у ${user}: \`${vip.steam_id}\` до ${formatVipUntil(vip.expires_at)} · источник ${vip.source}`,
+      flags: MessageFlags.Ephemeral,
+    });
+    return;
+  }
+
+  if (sub === "список") {
+    if (!canManageVip(interaction)) {
+      await interaction.reply({ content: "Нужно право Manage Server.", flags: MessageFlags.Ephemeral });
+      return;
+    }
+    const rows = store.activeVips();
+    if (!rows.length) {
+      await interaction.reply({ content: "Активных VIP нет.", flags: MessageFlags.Ephemeral });
+      return;
+    }
+    const lines = rows.slice(0, 40).map((row, i) => {
+      const who = row.discord_id ? `<@${row.discord_id}>` : row.name || "—";
+      return `${i + 1}. ${who} · \`${row.steam_id}\` · до ${formatVipUntil(row.expires_at)}`;
+    });
+    const more = rows.length > 40 ? `\n…и ещё ${rows.length - 40}` : "";
+    await interaction.reply({
+      content: `Активных VIP: **${rows.length}/${config.vipMaxSlots}**\n${lines.join("\n")}${more}`,
+      flags: MessageFlags.Ephemeral,
+    });
+    return;
+  }
+
+  if (sub === "выдать") {
+    if (!canManageVip(interaction)) {
+      await interaction.reply({ content: "Нужно право Manage Server.", flags: MessageFlags.Ephemeral });
+      return;
+    }
+    await acknowledge(interaction);
+    const steamId = String(interaction.options.getString("steamid") || "").trim();
+    const days = interaction.options.getInteger("дней") || config.vipDays;
+    const user = interaction.options.getUser("игрок");
+    const result = await grantVip(interaction.client, store, servers, {
+      steamId,
+      discordId: user?.id || "",
+      days,
+      source: "manual",
+      note: `by ${interaction.user.id}`,
+    });
+    if (!result.ok) {
+      const why =
+        result.error === "full"
+          ? `лимит ${config.vipMaxSlots} уже занят`
+          : result.error === "bad_steam"
+            ? "нужен SteamID64"
+            : result.error;
+      await interaction.editReply({ content: `Не выдал: ${why}` });
+      return;
+    }
+    await interaction.editReply({
+      content: `VIP выдан \`${result.steamId}\`${result.discordId ? ` · <@${result.discordId}>` : ""} до ${formatVipUntil(result.expiresAt)}${result.reservedOk ? "" : " (RCON не дожал — смотри лог)"}${result.extended ? " · продление" : ""}`,
+    });
+    return;
+  }
+
+  if (sub === "снять") {
+    if (!canManageVip(interaction)) {
+      await interaction.reply({ content: "Нужно право Manage Server.", flags: MessageFlags.Ephemeral });
+      return;
+    }
+    await acknowledge(interaction);
+    const steamId = String(interaction.options.getString("steamid") || "").trim();
+    const result = await revokeVip(interaction.client, store, servers, steamId);
+    if (!result.ok) {
+      await interaction.editReply({ content: "Такого VIP в базе нет." });
+      return;
+    }
+    await interaction.editReply({
+      content: result.keptReserveAsKing
+        ? `VIP снят у \`${result.steamId}\`, но reserved оставлен — он царь горы.`
+        : `VIP снят у \`${result.steamId}\`.`,
+    });
+    return;
+  }
+
+  if (sub === "донаты") {
+    if (!canManageVip(interaction)) {
+      await interaction.reply({ content: "Нужно право Manage Server.", flags: MessageFlags.Ephemeral });
+      return;
+    }
+    await acknowledge(interaction);
+    try {
+      const out = await pollDonationAlerts(interaction.client, store, servers);
+      if (!out.ok) {
+        await interaction.editReply({ content: "DonationAlerts не настроен — задай DA_ACCESS_TOKEN в .env." });
+        return;
+      }
+      await interaction.editReply({
+        content: `Проверил донатов: **${out.checked}**, выдано VIP: **${out.granted}**.`,
+      });
+    } catch (error) {
+      await interaction.editReply({
+        content: `Ошибка DonationAlerts: ${error instanceof Error ? error.message : error}`,
+      });
+    }
+  }
 }
