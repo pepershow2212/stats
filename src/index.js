@@ -7,7 +7,7 @@ import { startMockRcon } from "./mock-rcon.js";
 import { Poller } from "./poller.js";
 
 async function main() {
-  console.log("сборка царь-слот-5 — слот на #1 даже если ScorePeriod кривой");
+  console.log("сборка царь-слот-6 — без спама reserve fetch failed");
   const servers = trackedServers();
   if (!servers.length) {
     if (!envFileExists()) {

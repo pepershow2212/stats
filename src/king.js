@@ -40,25 +40,47 @@ export function kingWeekKey(at = Date.now()) {
   return `${friday.getUTCFullYear()}-${String(friday.getUTCMonth() + 1).padStart(2, "0")}-${String(friday.getUTCDate()).padStart(2, "0")}`;
 }
 
+const reserveWarnAt = new Map();
+let reserveRetryAt = 0;
+
+function warnReserve(serverName, error) {
+  const key = String(serverName || "?");
+  const now = Date.now();
+  if ((reserveWarnAt.get(key) || 0) + 30 * 60 * 1000 > now) return;
+  reserveWarnAt.set(key, now);
+  console.warn("reserve", key, error instanceof Error ? error.message : error);
+}
+
 async function reserveOnEach(servers, steamId, on) {
   const results = [];
   for (const server of servers || []) {
     try {
       if (on) {
         const want = String(steamId);
-        const ids = await listReservedSlots(server).catch(() => []);
-        for (const occupied of ids) {
-          if (occupied !== want) await dropReservedSlot(server, occupied);
+        let ids;
+        try {
+          ids = await listReservedSlots(server);
+        } catch (error) {
+          warnReserve(server.name, error);
+          results.push({ id: server.id, name: server.name, ok: false });
+          continue;
         }
-        if (!ids.includes(want)) await addReservedSlot(server, steamId);
-        const after = await listReservedSlots(server).catch(() => []);
+        if (ids.includes(want)) {
+          results.push({ id: server.id, name: server.name, ok: true });
+          continue;
+        }
+        for (const occupied of ids) {
+          if (occupied !== want) await dropReservedSlot(server, occupied).catch(() => {});
+        }
+        await addReservedSlot(server, steamId);
+        const after = await listReservedSlots(server);
         if (!after.includes(want)) throw new Error("слот не записался в RCON");
       } else {
         await dropReservedSlot(server, steamId);
       }
       results.push({ id: server.id, name: server.name, ok: true });
     } catch (error) {
-      console.warn("reserve", server.name, error instanceof Error ? error.message : error);
+      warnReserve(server.name, error);
       results.push({ id: server.id, name: server.name, ok: false });
     }
   }
@@ -83,22 +105,24 @@ export async function syncKingReserve(store, servers) {
   const king = store.latestKing();
   if (!king?.steam_id) return;
   if (king.week_key !== kingWeekKey()) return;
-  await dropOldKings(store, servers, king.steam_id);
+  if (king.reserved_ok) return;
+  const now = Date.now();
+  if (now < reserveRetryAt) return;
+  reserveRetryAt = now + 30 * 60 * 1000;
   const reservedOk = allServersOk(await reserveOnEach(servers, king.steam_id, true));
-  if (reservedOk && !king.reserved_ok) {
-    store.saveKing({
-      weekKey: king.week_key,
-      steamId: king.steam_id,
-      name: king.name,
-      kills: king.kills,
-      deaths: king.deaths,
-      discordId: king.discord_id,
-      crownedAt: king.crowned_at,
-      reservedOk: true,
-      roleOk: Boolean(king.role_ok),
-    });
-    console.log(`царь горы: резерв дожал на #1 и #2 для ${king.name}`);
-  }
+  if (!reservedOk) return;
+  store.saveKing({
+    weekKey: king.week_key,
+    steamId: king.steam_id,
+    name: king.name,
+    kills: king.kills,
+    deaths: king.deaths,
+    discordId: king.discord_id,
+    crownedAt: king.crowned_at,
+    reservedOk: true,
+    roleOk: Boolean(king.role_ok),
+  });
+  console.log(`царь горы: VIP дожал на #1 и #2 для ${king.name}`);
 }
 
 async function ensureRole(guild) {

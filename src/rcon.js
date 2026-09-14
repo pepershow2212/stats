@@ -60,6 +60,9 @@ export async function rconCall(server, path, options = {}) {
       return body;
     } catch (error) {
       lastError = error;
+      // Prefer the scheme that already works for this host; don't burn on https timeouts.
+      if (schemeCache.has(key) && scheme === schemeCache.get(key)) break;
+      if (!server.tls && scheme === "http") break;
     }
   }
   throw lastError;
@@ -105,14 +108,20 @@ async function writeReservedViaConfig(server, keepIds) {
 }
 
 export async function listReservedSlots(server) {
-  try {
-    const body = await rconGet(server, "/v1/reserved-slots", 5000);
-    const ids = body?.reservedSlots || body?.steamIds || [];
-    if (Array.isArray(ids)) return ids.map(String);
-  } catch {
-    // fallback below
+  const body = await rconGet(server, "/v1/reserved-slots", 4000);
+  const ids = body?.reservedSlots || body?.steamIds || [];
+  if (Array.isArray(ids) && ids.length) return ids.map(String);
+  if (Array.isArray(ids)) {
+    try {
+      const doc = await rconGet(server, "/v1/config", 6000);
+      const fromConfig = reservedIdsFromConfig(doc?.text || "");
+      if (fromConfig.length) return fromConfig;
+    } catch {
+      // empty list from API is enough
+    }
+    return [];
   }
-  const doc = await rconGet(server, "/v1/config", 8000);
+  const doc = await rconGet(server, "/v1/config", 6000);
   return reservedIdsFromConfig(doc?.text || "");
 }
 
