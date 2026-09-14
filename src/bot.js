@@ -12,16 +12,6 @@ import {
 import { dirname } from "node:path";
 import { config } from "./config.js";
 import { announceCurrentKing, announceKingRules, crownKing, grantKingRoleOnLink, startKingLoop } from "./king.js";
-import { grantVip, grantVipRoleOnLink, revokeVip, startVipLoop, formatVipStatus, getVipCapacity } from "./vip.js";
-import {
-  VIP_PANEL_HOW,
-  VIP_PANEL_STATUS,
-  placeVipPanel,
-  refreshVipPanels,
-  removeAllVipPanels,
-  removeVipPanel,
-  replyVipStatus,
-} from "./vip-panel.js";
 import { renderStatsCard } from "./card.js";
 import { fetchCommunityProfile } from "./steam.js";
 import { Cooldown } from "./cooldown.js";
@@ -152,68 +142,7 @@ export function buildCommands(servers) {
     .addSubcommand((sub) => sub.setName("пост").setDescription("Ещё раз отправить красивый пост в канал"))
     .addSubcommand((sub) => sub.setName("как").setDescription("Пост в канал: как работает царь горы"));
 
-  const vip = new SlashCommandBuilder()
-    .setName("vip")
-    .setDescription("VIP queue priority")
-    .setDescriptionLocalization("ru", "VIP — приоритет в очереди")
-    .addSubcommand((sub) =>
-      sub
-        .setName("купить")
-        .setDescription("How to buy VIP")
-        .setDescriptionLocalization("ru", "Как купить VIP"),
-    )
-    .addSubcommand((sub) =>
-      sub
-        .setName("статус")
-        .setDescription("VIP status")
-        .setDescriptionLocalization("ru", "Статус VIP")
-        .addUserOption((option) =>
-          option.setName("игрок").setDescription("Участник Discord").setDescriptionLocalization("ru", "Участник Discord"),
-        ),
-    )
-    .addSubcommand((sub) =>
-      sub
-        .setName("список")
-        .setDescription("Active VIP list")
-        .setDescriptionLocalization("ru", "Список активных VIP"),
-    )
-    .addSubcommand((sub) =>
-      sub
-        .setName("выдать")
-        .setDescription("Grant VIP manually")
-        .setDescriptionLocalization("ru", "Выдать VIP вручную")
-        .addStringOption((option) =>
-          option
-            .setName("steamid")
-            .setDescription("SteamID64")
-            .setRequired(true),
-        )
-        .addIntegerOption((option) =>
-          option.setName("дней").setDescription("Срок в днях").setMinValue(1).setMaxValue(3650),
-        )
-        .addUserOption((option) =>
-          option.setName("игрок").setDescription("Discord для роли"),
-        ),
-    )
-    .addSubcommand((sub) =>
-      sub
-        .setName("снять")
-        .setDescription("Revoke VIP")
-        .setDescriptionLocalization("ru", "Снять VIP")
-        .addStringOption((option) =>
-          option.setName("steamid").setDescription("SteamID64").setRequired(true),
-        ),
-    )
-    .addSubcommandGroup((group) =>
-      group
-        .setName("панель")
-        .setDescription("Отдельная VIP-панель в канале")
-        .addSubcommand((sub) => sub.setName("поставить").setDescription("Поставить VIP-панель в этот канал"))
-        .addSubcommand((sub) => sub.setName("убрать").setDescription("Убрать VIP-панель из этого канала"))
-        .addSubcommand((sub) => sub.setName("убрать-все").setDescription("Убрать все VIP-панели")),
-    );
-
-  return [stats, top, live, link, unlink, panel, prize, king, vip];
+  return [stats, top, live, link, unlink, panel, prize, king];
 }
 
 function dataDir() {
@@ -283,12 +212,6 @@ export async function startBot({ token, clientId, guildId, store, poller, server
     lastPanelAt = 0;
     pushPanels();
     startKingLoop(ready, store, servers);
-    startVipLoop(ready, store, servers);
-    for (const row of store.vipPanels()) {
-      const channel = await ready.channels.fetch(row.channel_id).catch(() => null);
-      if (channel) await placeVipPanel(channel, store, servers).catch(() => {});
-    }
-    setInterval(() => void refreshVipPanels(ready, store, servers).catch(() => {}), 2 * 60 * 1000);
   });
 
   client.on(Events.GuildDelete, (guild) => {
@@ -359,34 +282,6 @@ export async function startBot({ token, clientId, guildId, store, poller, server
         await bumpPanel(interaction.channel, store, poller, servers);
         return;
       }
-      if (interaction.isButton() && interaction.customId === VIP_PANEL_STATUS) {
-        await interaction.reply({
-          ...replyVipStatus(store, interaction.user),
-          flags: MessageFlags.Ephemeral,
-        });
-        return;
-      }
-      if (interaction.isButton() && interaction.customId === VIP_PANEL_HOW) {
-        const url = config.vipDonateUrl || "https://boosty.to/wardogsrussia";
-        const capacity = await getVipCapacity(store, servers);
-        await interaction.reply({
-          content: [
-            "**Как купить VIP**",
-            "",
-            "**1.** `/link` + SteamID64 (один раз)",
-            `**2.** Оплата: ${url}`,
-            `    от **${config.vipPriceRub} ₽** = **${config.vipDays} дней**`,
-            "**3.** Напиши админам: оплатил VIP + SteamID (или что уже `/link`)",
-            "**4.** Админ выдаёт — VIP и роль включаются сразу",
-            "",
-            `Слоты: **${capacity.active} / ${capacity.max}** · ${
-              capacity.full ? "⛔ купить нельзя" : `✅ свободно ${capacity.open}`
-            }`,
-          ].join("\n"),
-          flags: MessageFlags.Ephemeral,
-        });
-        return;
-      }
       if (interaction.isModalSubmit() && interaction.customId === PANEL_MODAL) {
         if (await denyCooldown(interaction)) return;
         if (await replyStats(interaction, store, poller, servers, interaction.fields.getTextInputValue("query"))) {
@@ -431,8 +326,6 @@ export async function startBot({ token, clientId, guildId, store, poller, server
         await cmdPrize(interaction, store);
       } else if (interaction.commandName === "царь") {
         await cmdKing(interaction, store, servers);
-      } else if (interaction.commandName === "vip") {
-        await cmdVip(interaction, store, servers);
       }
     } catch (error) {
       console.error("command", interaction.commandName || interaction.customId, error);
@@ -654,14 +547,9 @@ async function cmdLink(interaction, store) {
   }
   store.link(interaction.user.id, steamId, Date.now());
   const kingRole = await grantKingRoleOnLink(interaction.client, store, interaction.user.id, steamId);
-  const vipRole = await grantVipRoleOnLink(interaction.client, store, interaction.user.id, steamId);
-  const extras = [
-    kingRole ? "царь горы — роль выдана" : "",
-    vipRole ? "VIP — роль выдана" : "",
-  ].filter(Boolean);
   await interaction.reply({
-    content: extras.length
-      ? `Привязал ${interaction.user} → \`${steamId}\`. ${extras.join("; ")}.`
+    content: kingRole
+      ? `Привязал ${interaction.user} → \`${steamId}\`. Ты царь горы — роль выдана.`
       : `Привязал ${interaction.user} → \`${steamId}\`.`,
     flags: MessageFlags.Ephemeral,
   });
@@ -670,153 +558,4 @@ async function cmdLink(interaction, store) {
 async function cmdUnlink(interaction, store) {
   store.unlinkDiscord(interaction.user.id);
   await interaction.reply({ content: "Steam отвязан.", flags: MessageFlags.Ephemeral });
-}
-
-function canManageVip(interaction) {
-  return interaction.memberPermissions?.has(PermissionFlagsBits.ManageGuild);
-}
-
-function formatVipUntil(expiresAt) {
-  return `<t:${Math.floor(Number(expiresAt) / 1000)}:d>`;
-}
-
-async function cmdVip(interaction, store, servers) {
-  const group = interaction.options.getSubcommandGroup(false);
-  const sub = interaction.options.getSubcommand(false) || "купить";
-
-  if (group === "панель") {
-    if (!canManageVip(interaction)) {
-      await interaction.reply({ content: "Нужно право Manage Server.", flags: MessageFlags.Ephemeral });
-      return;
-    }
-    await acknowledge(interaction);
-    if (sub === "убрать-все") {
-      const count = await removeAllVipPanels(interaction.client, store);
-      await interaction.editReply({ content: `Снял VIP-панелей: ${count}.` });
-      return;
-    }
-    if (sub === "убрать") {
-      const gone = await removeVipPanel(interaction.channel, store);
-      await interaction.editReply({
-        content: gone ? "VIP-панель снял." : "В этом канале VIP-панели не было.",
-      });
-      return;
-    }
-    await placeVipPanel(interaction.channel, store, servers);
-    await interaction.editReply({ content: "VIP-панель поставлена в этот канал." });
-    return;
-  }
-
-  if (sub === "купить") {
-    const url = config.vipDonateUrl || "https://boosty.to/wardogsrussia";
-    const capacity = await getVipCapacity(store, servers);
-    await interaction.reply({
-      content: [
-        "**VIP WARDOGS** — приоритет в очереди (#1 и #2) + роль в Discord.",
-        "",
-        `Цена: **${config.vipPriceRub} ₽** = **${config.vipDays} дней**`,
-        `Слоты: **${capacity.active} / ${capacity.max}** · ${
-          capacity.full ? "⛔ сейчас купить нельзя" : `✅ свободно ${capacity.open}`
-        }`,
-        "",
-        "**Как купить**",
-        "1. `/link` + SteamID64",
-        `2. Оплата: ${url}`,
-        "3. Напиши админам: оплатил VIP + SteamID",
-        "4. Админ выдаёт — VIP и роль сразу",
-        "",
-        "Статус: кнопка **Мой VIP** на панели.",
-      ].join("\n"),
-      flags: MessageFlags.Ephemeral,
-    });
-    return;
-  }
-
-  if (sub === "статус") {
-    const user = interaction.options.getUser("игрок") || interaction.user;
-    await interaction.reply({
-      ...formatVipStatus(store, user),
-      flags: MessageFlags.Ephemeral,
-    });
-    return;
-  }
-
-  if (sub === "список") {
-    if (!canManageVip(interaction)) {
-      await interaction.reply({ content: "Нужно право Manage Server.", flags: MessageFlags.Ephemeral });
-      return;
-    }
-    const rows = store.activeVips();
-    const capacity = await getVipCapacity(store, servers);
-    if (!rows.length) {
-      await interaction.reply({
-        content: `Активных VIP нет. Слоты: **0 / ${capacity.max}**.`,
-        flags: MessageFlags.Ephemeral,
-      });
-      return;
-    }
-    const lines = rows.slice(0, 40).map((row, i) => {
-      const who = row.discord_id ? `<@${row.discord_id}>` : row.name || "—";
-      return `${i + 1}. ${who} · \`${row.steam_id}\` · до ${formatVipUntil(row.expires_at)}`;
-    });
-    const more = rows.length > 40 ? `\n…и ещё ${rows.length - 40}` : "";
-    await interaction.reply({
-      content: `Активных VIP: **${capacity.active} / ${capacity.max}**${capacity.full ? " · полный" : ` · свободно ${capacity.open}`}\n${lines.join("\n")}${more}`,
-      flags: MessageFlags.Ephemeral,
-    });
-    return;
-  }
-
-  if (sub === "выдать") {
-    if (!canManageVip(interaction)) {
-      await interaction.reply({ content: "Нужно право Manage Server.", flags: MessageFlags.Ephemeral });
-      return;
-    }
-    await acknowledge(interaction);
-    const steamId = String(interaction.options.getString("steamid") || "").trim();
-    const days = interaction.options.getInteger("дней") || config.vipDays;
-    const user = interaction.options.getUser("игрок");
-    const result = await grantVip(interaction.client, store, servers, {
-      steamId,
-      discordId: user?.id || "",
-      days,
-      source: "manual",
-      amount: config.vipPriceRub,
-      currency: "RUB",
-      note: `by ${interaction.user.id}`,
-    });
-    if (!result.ok) {
-      const why =
-        result.error === "full"
-          ? `лимит уже занят (${result.active}/${result.max})`
-          : result.error === "bad_steam"
-            ? "нужен SteamID64"
-            : result.error;
-      await interaction.editReply({ content: `Не выдал: ${why}` });
-      return;
-    }
-    await interaction.editReply({
-      content: `VIP выдан \`${result.steamId}\`${result.discordId ? ` · <@${result.discordId}>` : ""} до ${formatVipUntil(result.expiresAt)}${result.reservedOk ? "" : " (RCON не дожал — смотри лог)"}${result.extended ? " · продление" : ""}`,
-    });
-    return;
-  }
-
-  if (sub === "снять") {
-    if (!canManageVip(interaction)) {
-      await interaction.reply({ content: "Нужно право Manage Server.", flags: MessageFlags.Ephemeral });
-      return;
-    }
-    await acknowledge(interaction);
-    const steamId = String(interaction.options.getString("steamid") || "").trim();
-    const result = await revokeVip(interaction.client, store, servers, steamId);
-    if (!result.ok) {
-      await interaction.editReply({ content: "Такого VIP в базе нет." });
-      return;
-    }
-    await interaction.editReply({
-      content: result.keptReserveAsKing
-        ? `VIP снят у \`${result.steamId}\`, но reserved оставлен — он царь горы.`
-        : `VIP снят у \`${result.steamId}\`.`,
-    });
-  }
 }

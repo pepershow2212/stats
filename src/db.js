@@ -95,27 +95,6 @@ CREATE TABLE IF NOT EXISTS hill_kings (
   role_ok INTEGER NOT NULL DEFAULT 0
 );
 
-CREATE TABLE IF NOT EXISTS vip_members (
-  steam_id TEXT PRIMARY KEY,
-  discord_id TEXT NOT NULL DEFAULT '',
-  name TEXT NOT NULL DEFAULT '',
-  source TEXT NOT NULL DEFAULT 'manual',
-  donation_id TEXT,
-  amount REAL NOT NULL DEFAULT 0,
-  currency TEXT NOT NULL DEFAULT 'RUB',
-  starts_at INTEGER NOT NULL,
-  expires_at INTEGER NOT NULL,
-  reserved_ok INTEGER NOT NULL DEFAULT 0,
-  role_ok INTEGER NOT NULL DEFAULT 0,
-  note TEXT NOT NULL DEFAULT ''
-);
-
-CREATE TABLE IF NOT EXISTS vip_panels (
-  channel_id TEXT PRIMARY KEY,
-  message_id TEXT NOT NULL,
-  guild_id TEXT NOT NULL
-);
-
 CREATE TABLE IF NOT EXISTS server_stats (
   steam_id TEXT NOT NULL,
   server_id TEXT NOT NULL,
@@ -136,8 +115,6 @@ CREATE INDEX IF NOT EXISTS idx_match_steam ON match_stats(steam_id, ended_at);
 CREATE INDEX IF NOT EXISTS idx_sessions_open ON sessions(server_id, left_at);
 CREATE INDEX IF NOT EXISTS idx_prize_boards_created ON prize_boards(created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_server_stats_kills ON server_stats(server_id, kills DESC);
-CREATE INDEX IF NOT EXISTS idx_vip_expires ON vip_members(expires_at);
-CREATE INDEX IF NOT EXISTS idx_vip_discord ON vip_members(discord_id);
 `;
 
 function backfillServerStats(db) {
@@ -265,44 +242,6 @@ export class StatsStore {
     this._getKing = db.prepare(`SELECT * FROM hill_kings WHERE week_key = ?`);
     this._latestKing = db.prepare(`SELECT * FROM hill_kings ORDER BY crowned_at DESC LIMIT 1`);
     this._allKings = db.prepare(`SELECT * FROM hill_kings ORDER BY crowned_at DESC`);
-    this._getVip = db.prepare(`SELECT * FROM vip_members WHERE steam_id = ?`);
-    this._getVipByDiscord = db.prepare(`SELECT * FROM vip_members WHERE discord_id = ? ORDER BY expires_at DESC LIMIT 1`);
-    this._upsertVip = db.prepare(`
-      INSERT INTO vip_members (
-        steam_id, discord_id, name, source, donation_id, amount, currency,
-        starts_at, expires_at, reserved_ok, role_ok, note
-      ) VALUES (
-        @steamId, @discordId, @name, @source, @donationId, @amount, @currency,
-        @startsAt, @expiresAt, @reservedOk, @roleOk, @note
-      )
-      ON CONFLICT(steam_id) DO UPDATE SET
-        discord_id = CASE WHEN excluded.discord_id != '' THEN excluded.discord_id ELSE vip_members.discord_id END,
-        name = CASE WHEN excluded.name != '' THEN excluded.name ELSE vip_members.name END,
-        source = excluded.source,
-        donation_id = COALESCE(excluded.donation_id, vip_members.donation_id),
-        amount = excluded.amount,
-        currency = excluded.currency,
-        starts_at = excluded.starts_at,
-        expires_at = excluded.expires_at,
-        reserved_ok = excluded.reserved_ok,
-        role_ok = excluded.role_ok,
-        note = excluded.note
-    `);
-    this._activeVips = db.prepare(`
-      SELECT * FROM vip_members
-      WHERE expires_at > ?
-      ORDER BY expires_at ASC
-    `);
-    this._expiredVips = db.prepare(`
-      SELECT * FROM vip_members
-      WHERE expires_at <= ?
-      ORDER BY expires_at ASC
-    `);
-    this._countActiveVip = db.prepare(`SELECT COUNT(*) AS n FROM vip_members WHERE expires_at > ?`);
-    this._deleteVip = db.prepare(`DELETE FROM vip_members WHERE steam_id = ?`);
-    this._markVipFlags = db.prepare(`
-      UPDATE vip_members SET reserved_ok = @reservedOk, role_ok = @roleOk WHERE steam_id = @steamId
-    `);
     this._findName = db.prepare(`
       SELECT * FROM players
       WHERE name = ? COLLATE NOCASE
@@ -341,14 +280,6 @@ export class StatsStore {
       ON CONFLICT(channel_id) DO UPDATE SET message_id = excluded.message_id, guild_id = excluded.guild_id
     `);
     this._deletePanel = db.prepare(`DELETE FROM panels WHERE channel_id = ?`);
-    this._getVipPanel = db.prepare(`SELECT * FROM vip_panels WHERE channel_id = ?`);
-    this._allVipPanels = db.prepare(`SELECT * FROM vip_panels`);
-    this._setVipPanel = db.prepare(`
-      INSERT INTO vip_panels (channel_id, message_id, guild_id)
-      VALUES (@channelId, @messageId, @guildId)
-      ON CONFLICT(channel_id) DO UPDATE SET message_id = excluded.message_id, guild_id = excluded.guild_id
-    `);
-    this._deleteVipPanel = db.prepare(`DELETE FROM vip_panels WHERE channel_id = ?`);
     this._insertBoard = db.prepare(`
       INSERT INTO prize_boards (reason, created_at, frozen)
       VALUES (@reason, @createdAt, @frozen)
@@ -502,63 +433,6 @@ export class StatsStore {
 
   allKings() {
     return this._allKings.all();
-  }
-
-  vip(steamId) {
-    return this._getVip.get(String(steamId || "")) || null;
-  }
-
-  vipForDiscord(discordId) {
-    return this._getVipByDiscord.get(String(discordId || "")) || null;
-  }
-
-  activeVip(steamId, at = Date.now()) {
-    const row = this.vip(steamId);
-    if (!row) return null;
-    return row.expires_at > at ? row : null;
-  }
-
-  activeVips(at = Date.now()) {
-    return this._activeVips.all(at);
-  }
-
-  expiredVipsNeedingDrop(at = Date.now()) {
-    return this._expiredVips.all(at);
-  }
-
-  activeVipCount(at = Date.now()) {
-    return Number(this._countActiveVip.get(at)?.n || 0);
-  }
-
-  saveVip(row) {
-    this._upsertVip.run({
-      steamId: String(row.steamId),
-      discordId: row.discordId || "",
-      name: row.name || "",
-      source: row.source || "manual",
-      donationId: row.donationId || null,
-      amount: Number(row.amount) || 0,
-      currency: row.currency || "RUB",
-      startsAt: row.startsAt,
-      expiresAt: row.expiresAt,
-      reservedOk: row.reservedOk ? 1 : 0,
-      roleOk: row.roleOk ? 1 : 0,
-      note: row.note || "",
-    });
-  }
-
-  markVipFlags(steamId, { reservedOk, roleOk }) {
-    const row = this.vip(steamId);
-    if (!row) return;
-    this._markVipFlags.run({
-      steamId: String(steamId),
-      reservedOk: reservedOk == null ? row.reserved_ok : reservedOk ? 1 : 0,
-      roleOk: roleOk == null ? row.role_ok : roleOk ? 1 : 0,
-    });
-  }
-
-  dropVip(steamId) {
-    this._deleteVip.run(String(steamId));
   }
 
   extras(steamId) {
@@ -730,22 +604,6 @@ export class StatsStore {
 
   dropPanel(channelId) {
     this._deletePanel.run(channelId);
-  }
-
-  vipPanel(channelId) {
-    return this._getVipPanel.get(channelId) || null;
-  }
-
-  vipPanels() {
-    return this._allVipPanels.all();
-  }
-
-  saveVipPanel(channelId, messageId, guildId) {
-    this._setVipPanel.run({ channelId, messageId, guildId });
-  }
-
-  dropVipPanel(channelId) {
-    this._deleteVipPanel.run(channelId);
   }
 
   close() {

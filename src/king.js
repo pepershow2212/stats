@@ -69,7 +69,7 @@ async function reserveOnEach(servers, steamId, on) {
           results.push({ id: server.id, name: server.name, ok: true });
           continue;
         }
-        // Только дописываем царя — платных VIP и чужие слоты не трогаем.
+        // Дописываем царя, чужие reserved-слоты не трогаем.
         await addReservedSlot(server, steamId);
         const after = await listReservedSlots(server);
         if (!after.includes(want)) throw new Error("слот не записался в RCON");
@@ -95,8 +95,6 @@ async function dropOldKings(store, servers, keepSteamId) {
     const steamId = String(row.steam_id || "");
     if (!steamId || seen.has(steamId)) continue;
     seen.add(steamId);
-    // Платный VIP оставляем — снимаем только корону царя.
-    if (store.activeVip?.(steamId)) continue;
     await reserveOnEach(servers, steamId, false);
   }
 }
