@@ -303,14 +303,7 @@ export function formatVipStatus(store, user) {
     Number(vip.amount) > 0
       ? `**${vip.amount}** ${vip.currency || "RUB"}`
       : "не указано";
-  const source =
-    vip.source === "donationalerts"
-      ? "DonationAlerts"
-      : vip.source === "boosty"
-        ? "Boosty"
-        : vip.source === "manual"
-          ? "вручную"
-          : vip.source || "—";
+  const source = vip.source === "manual" || !vip.source ? "вручную" : String(vip.source);
 
   return {
     content: [

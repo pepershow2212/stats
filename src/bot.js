@@ -780,10 +780,10 @@ async function cmdVip(interaction, store, servers) {
       steamId,
       discordId: user?.id || "",
       days,
-      source: "boosty",
+      source: "manual",
       amount: config.vipPriceRub,
       currency: "RUB",
-      note: `boosty by ${interaction.user.id}`,
+      note: `by ${interaction.user.id}`,
     });
     if (!result.ok) {
       const why =

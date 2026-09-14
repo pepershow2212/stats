@@ -110,19 +110,6 @@ CREATE TABLE IF NOT EXISTS vip_members (
   note TEXT NOT NULL DEFAULT ''
 );
 
-CREATE TABLE IF NOT EXISTS vip_donations (
-  donation_id TEXT PRIMARY KEY,
-  steam_id TEXT NOT NULL DEFAULT '',
-  discord_id TEXT NOT NULL DEFAULT '',
-  username TEXT NOT NULL DEFAULT '',
-  message TEXT NOT NULL DEFAULT '',
-  amount REAL NOT NULL DEFAULT 0,
-  currency TEXT NOT NULL DEFAULT 'RUB',
-  status TEXT NOT NULL DEFAULT 'pending',
-  created_at INTEGER NOT NULL,
-  processed_at INTEGER
-);
-
 CREATE TABLE IF NOT EXISTS vip_panels (
   channel_id TEXT PRIMARY KEY,
   message_id TEXT NOT NULL,
@@ -315,23 +302,6 @@ export class StatsStore {
     this._deleteVip = db.prepare(`DELETE FROM vip_members WHERE steam_id = ?`);
     this._markVipFlags = db.prepare(`
       UPDATE vip_members SET reserved_ok = @reservedOk, role_ok = @roleOk WHERE steam_id = @steamId
-    `);
-    this._getDonation = db.prepare(`SELECT * FROM vip_donations WHERE donation_id = ?`);
-    this._upsertDonation = db.prepare(`
-      INSERT INTO vip_donations (
-        donation_id, steam_id, discord_id, username, message, amount, currency, status, created_at, processed_at
-      ) VALUES (
-        @donationId, @steamId, @discordId, @username, @message, @amount, @currency, @status, @createdAt, @processedAt
-      )
-      ON CONFLICT(donation_id) DO UPDATE SET
-        steam_id = excluded.steam_id,
-        discord_id = excluded.discord_id,
-        username = excluded.username,
-        message = excluded.message,
-        amount = excluded.amount,
-        currency = excluded.currency,
-        status = excluded.status,
-        processed_at = excluded.processed_at
     `);
     this._findName = db.prepare(`
       SELECT * FROM players
@@ -589,25 +559,6 @@ export class StatsStore {
 
   dropVip(steamId) {
     this._deleteVip.run(String(steamId));
-  }
-
-  donation(donationId) {
-    return this._getDonation.get(String(donationId)) || null;
-  }
-
-  saveDonation(row) {
-    this._upsertDonation.run({
-      donationId: String(row.donationId),
-      steamId: row.steamId || "",
-      discordId: row.discordId || "",
-      username: row.username || "",
-      message: row.message || "",
-      amount: Number(row.amount) || 0,
-      currency: row.currency || "RUB",
-      status: row.status || "pending",
-      createdAt: row.createdAt || Date.now(),
-      processedAt: row.processedAt ?? null,
-    });
   }
 
   extras(steamId) {
